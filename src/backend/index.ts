@@ -1,0 +1,195 @@
+import type { IncomingMessage } from "node:http";
+import type { PluginContext } from "@termix-ssh/plugin-sdk/backend";
+import type { WebSocket } from "ws";
+import { adbKeyFromPem, generateAdbKey, type AdbKey } from "./adb-key.js";
+import { openAdbShell, type AdbShell } from "./adb-protocol.js";
+
+const DEFAULT_PORT = 5555;
+const CLOSE_POLICY = 1008;
+const CLOSE_NORMAL = 1000;
+const CLOSE_ERROR = 1011;
+
+type ServerMessage =
+  | { type: "phase"; phase: "connecting" | "authorizing" | "ready" }
+  | { type: "exit"; code?: number }
+  | { type: "error"; message: string };
+
+function clampInt(
+  value: string | null,
+  fallback: number,
+  min: number,
+  max: number,
+) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function activate(ctx: PluginContext): void {
+  let keyPromise: Promise<AdbKey> | null = null;
+
+  // One key for the whole server, so a device approves Termix once.
+  const loadKey = (): Promise<AdbKey> => {
+    keyPromise ??= (async () => {
+      const stored = await ctx.settings.get<string>("privateKey");
+      if (stored) {
+        try {
+          return adbKeyFromPem(stored);
+        } catch (error) {
+          ctx.log.warn(
+            `Stored ADB key is unusable, making a new one: ${errorText(error)}`,
+          );
+        }
+      }
+      const created = generateAdbKey();
+      await ctx.settings.set("privateKey", created.privateKeyPem);
+      return created;
+    })().catch((error) => {
+      keyPromise = null;
+      throw error;
+    });
+    return keyPromise;
+  };
+
+  ctx.ws.route("/shell", async (connection) => {
+    const ws = connection.socket as WebSocket;
+    const request = connection.request as IncomingMessage;
+
+    const say = (message: ServerMessage) => {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+    };
+    const refuse = (message: string, code = CLOSE_POLICY) => {
+      say({ type: "error", message });
+      ws.close(code, message.slice(0, 120));
+    };
+
+    const url = new URL(request.url ?? "", "http://localhost");
+    const hostId = Number.parseInt(url.searchParams.get("hostId") ?? "", 10);
+    if (!Number.isInteger(hostId) || hostId <= 0) {
+      refuse("Missing host");
+      return;
+    }
+    const cols = clampInt(url.searchParams.get("cols"), 80, 1, 500);
+    const rows = clampInt(url.searchParams.get("rows"), 24, 1, 200);
+
+    // Queue what arrives while the device is still being reached.
+    let shell: AdbShell | null = null;
+    let closed = false;
+    const early: { data?: Buffer; size?: [number, number] }[] = [];
+    ws.on("message", (raw, isBinary) => {
+      if (isBinary) {
+        const data = Buffer.isBuffer(raw)
+          ? raw
+          : Buffer.concat(raw as Buffer[]);
+        if (shell) shell.write(data);
+        else early.push({ data });
+        return;
+      }
+      try {
+        const message = JSON.parse(String(raw)) as {
+          type?: string;
+          cols?: number;
+          rows?: number;
+        };
+        if (message.type === "resize" && message.cols && message.rows) {
+          if (shell) shell.resize(message.cols, message.rows);
+          else early.push({ size: [message.cols, message.rows] });
+        }
+      } catch {
+        // Not for us.
+      }
+    });
+    ws.on("close", () => {
+      closed = true;
+      shell?.close();
+    });
+    ws.on("error", () => {
+      closed = true;
+      shell?.close();
+    });
+
+    let target = "";
+    try {
+      const access = await ctx.hosts.checkAccess(hostId, "connect");
+      if (!access.hasAccess || !(await ctx.rbac.has("sessions"))) {
+        refuse("You can't connect to this host");
+        return;
+      }
+      const host = await ctx.hosts.get(hostId);
+      if (!host) {
+        refuse("Host not found");
+        return;
+      }
+      if (!(await ctx.settings.getHost<boolean>(hostId, "enableAdb"))) {
+        refuse("ADB is off for this host");
+        return;
+      }
+      const port =
+        (await ctx.settings.getHost<number>(hostId, "adbPort")) || DEFAULT_PORT;
+      target = `${host.ip}:${port}`;
+      const key = await loadKey();
+      if (closed) return;
+
+      shell = await openAdbShell(
+        {
+          host: host.ip,
+          port,
+          privateKeyPem: key.privateKeyPem,
+          publicKey: key.publicKey,
+          cols,
+          rows,
+        },
+        {
+          onData: (chunk) => {
+            if (ws.readyState === ws.OPEN) ws.send(chunk, { binary: true });
+          },
+          onPhase: (phase) => say({ type: "phase", phase }),
+          onClose: ({ exitCode, error }) => {
+            if (error) say({ type: "error", message: error });
+            else say({ type: "exit", code: exitCode });
+            ws.close(CLOSE_NORMAL);
+          },
+        },
+      );
+      if (closed) {
+        shell.close();
+        return;
+      }
+      for (const item of early.splice(0)) {
+        if (item.data) shell.write(item.data);
+        if (item.size) shell.resize(item.size[0], item.size[1]);
+      }
+      await ctx.audit.record({
+        action: "adb_shell_open",
+        resourceType: "host",
+        resourceId: String(hostId),
+        resourceName: host.name ?? host.ip,
+        details: `ADB shell to ${target}`,
+        success: true,
+        request,
+      });
+      ctx.hosts.trackSession(hostId);
+    } catch (error) {
+      const message = errorText(error);
+      ctx.log.warn(
+        `ADB connection to ${target || `host ${hostId}`} failed: ${message}`,
+      );
+      await ctx.audit
+        .record({
+          action: "adb_shell_open",
+          resourceType: "host",
+          resourceId: String(hostId),
+          details: `ADB shell to ${target || `host ${hostId}`}`,
+          success: false,
+          errorMessage: message,
+          request,
+        })
+        .catch(() => undefined);
+      refuse(message, CLOSE_ERROR);
+    }
+  });
+}

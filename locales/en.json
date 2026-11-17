@@ -1,0 +1,37 @@
+{
+  "hosts": {
+    "tabAdb": "ADB",
+    "adbDescription": "Android shell over ADB (TCP)"
+  },
+  "palette": {
+    "connectAdb": "Connect with ADB"
+  },
+  "permissions": {
+    "sessions": {
+      "title": "Open ADB sessions",
+      "description": "Open an ADB shell to hosts the user can connect to."
+    }
+  },
+  "settings": {
+    "admin": {
+      "privateKey": {
+        "label": "ADB key",
+        "description": "The RSA key this server proves itself to devices with. Made on first use."
+      }
+    },
+    "host": {
+      "enableAdb": { "label": "ADB" },
+      "adbPort": { "label": "ADB port" }
+    }
+  },
+  "adb": {
+    "noHostSelected": "No host selected",
+    "connecting": "Connecting to the device...",
+    "authorizing": "Allow USB debugging on the device screen (tick Always allow from this computer)...",
+    "ready": "Connected",
+    "reconnect": "Reconnect",
+    "closed": "Session ended",
+    "exitCode": "Session ended with exit code {{code}}",
+    "error": "Connection failed"
+  }
+}

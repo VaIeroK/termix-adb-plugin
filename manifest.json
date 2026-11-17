@@ -1,0 +1,86 @@
+{
+  "id": "adb",
+  "name": "ADB",
+  "version": "1.0.0",
+  "description": "An Android shell over ADB in your browser. Termix speaks the ADB protocol itself, so the server needs no adb binary.",
+  "author": {
+    "name": "ValeroK"
+  },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/your-org/termix-plugin-adb",
+  "docs": "https://github.com/your-org/termix-plugin-adb/tree/main/docs",
+  "category": "Terminal",
+  "icon": "Smartphone",
+  "features": [
+    "adb shell with a real terminal: colors, arrow keys, vim, window resize",
+    "Connects straight to the device over TCP, with no adb binary on the server",
+    "One RSA key for the whole server, approved once on the device",
+    "Tabs, split screen and host sharing like any other session"
+  ],
+  "env": [],
+  "engine": {
+    "termix": ">=26.11.1-0",
+    "api": "^1.5"
+  },
+  "capabilities": ["hosts:read", "network:serve", "ui:surface"],
+  "contributes": {
+    "tabs": [
+      {
+        "id": "adb",
+        "titleKey": "hosts.tabAdb",
+        "icon": "Smartphone",
+        "openFrom": ["host-context-menu", "palette"]
+      }
+    ],
+    "protocols": [
+      {
+        "id": "adb",
+        "defaultPort": 5555,
+        "hostLoginFallback": []
+      }
+    ],
+    "permissions": [
+      {
+        "name": "sessions",
+        "titleKey": "permissions.sessions.title",
+        "descriptionKey": "permissions.sessions.description",
+        "defaultRoles": ["admin", "user"]
+      }
+    ],
+    "settings": {
+      "admin": [
+        {
+          "key": "privateKey",
+          "type": "secret",
+          "labelKey": "settings.admin.privateKey.label",
+          "descriptionKey": "settings.admin.privateKey.description",
+          "hidden": true
+        }
+      ],
+      "host": {
+        "fields": [
+          {
+            "key": "enableAdb",
+            "type": "boolean",
+            "labelKey": "settings.host.enableAdb.label",
+            "default": false,
+            "hidden": true,
+            "defaultable": false
+          },
+          {
+            "key": "adbPort",
+            "type": "number",
+            "labelKey": "settings.host.adbPort.label",
+            "min": 1,
+            "max": 65535,
+            "default": 5555,
+            "hidden": true,
+            "defaultable": false
+          }
+        ]
+      }
+    }
+  },
+  "locales": "locales",
+  "platforms": ["linux", "win32", "darwin"]
+}
