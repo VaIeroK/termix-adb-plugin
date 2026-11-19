@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Termix-SSH/Termix/main/scripts/authz/authz.schema.json",
+  "seed": [],
+  "routes": {
+    "WS /plugin-ws/adb/shell": {
+      "access": "user",
+      "permission": "adb.sessions",
+      "resource": {
+        "kind": "host",
+        "min": "connect"
+      },
+      "allowed": "any",
+      "note": "Checks host access and the sessions permission itself; the test data has no ADB host"
+    }
+  }
+}

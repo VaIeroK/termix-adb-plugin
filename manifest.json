@@ -1,14 +1,14 @@
 {
   "id": "adb",
   "name": "ADB",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "An Android shell over ADB in your browser. Termix speaks the ADB protocol itself, so the server needs no adb binary.",
   "author": {
     "name": "ValeroK"
   },
   "license": "Apache-2.0",
-  "repository": "https://github.com/your-org/termix-plugin-adb",
-  "docs": "https://github.com/your-org/termix-plugin-adb/tree/main/docs",
+  "repository": "https://github.com/VaIeroK/termix-adb-plugin",
+  "docs": "https://github.com/VaIeroK/termix-adb-plugin/tree/main/docs",
   "category": "Terminal",
   "icon": "Smartphone",
   "features": [
@@ -19,17 +19,25 @@
   ],
   "env": [],
   "engine": {
-    "termix": ">=26.11.1-0",
-    "api": "^1.5"
+    "termix": ">=26.11.2-0",
+    "api": "^2.0.0"
   },
-  "capabilities": ["hosts:read", "network:serve", "ui:surface"],
+  "capabilities": [
+    "hosts:read",
+    "network:serve",
+    "network:sockets",
+    "ui:surface"
+  ],
   "contributes": {
     "tabs": [
       {
         "id": "adb",
         "titleKey": "hosts.tabAdb",
         "icon": "Smartphone",
-        "openFrom": ["host-context-menu", "palette"]
+        "openFrom": [
+          "host-context-menu",
+          "palette"
+        ]
       }
     ],
     "protocols": [
@@ -44,11 +52,21 @@
         "name": "sessions",
         "titleKey": "permissions.sessions.title",
         "descriptionKey": "permissions.sessions.description",
-        "defaultRoles": ["admin", "user"]
+        "defaultRoles": [
+          "admin",
+          "user"
+        ]
       }
     ],
     "settings": {
       "admin": [
+        {
+          "key": "allowPrivateNetworks",
+          "type": "boolean",
+          "labelKey": "settings.admin.allowPrivateNetworks.label",
+          "descriptionKey": "settings.admin.allowPrivateNetworks.description",
+          "default": true
+        },
         {
           "key": "privateKey",
           "type": "secret",
@@ -60,27 +78,28 @@
       "host": {
         "fields": [
           {
-            "key": "enableAdb",
-            "type": "boolean",
-            "labelKey": "settings.host.enableAdb.label",
-            "default": false,
-            "hidden": true,
-            "defaultable": false
-          },
-          {
             "key": "adbPort",
             "type": "number",
             "labelKey": "settings.host.adbPort.label",
             "min": 1,
             "max": 65535,
             "default": 5555,
-            "hidden": true,
-            "defaultable": false
+            "defaultable": false,
+            "descriptionKey": "settings.host.adbPort.description"
           }
-        ]
+        ],
+        "enableKey": "enableAdb",
+        "enableLabelKey": "settings.host.enableAdb.label",
+        "enableDescriptionKey": "settings.host.enableAdb.description",
+        "editorGroup": "top",
+        "editorOrder": 125
       }
     }
   },
   "locales": "locales",
-  "platforms": ["linux", "win32", "darwin"]
+  "platforms": [
+    "linux",
+    "win32",
+    "darwin"
+  ]
 }

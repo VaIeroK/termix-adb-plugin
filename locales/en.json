@@ -1,4 +1,8 @@
 {
+  "plugin": {
+    "name": "ADB",
+    "description": "An Android shell over ADB in your browser. Termix speaks the ADB protocol itself, so the server needs no adb binary."
+  },
   "hosts": {
     "tabAdb": "ADB",
     "adbDescription": "Android shell over ADB (TCP)"
@@ -17,11 +21,21 @@
       "privateKey": {
         "label": "ADB key",
         "description": "The RSA key this server proves itself to devices with. Made on first use."
+      },
+      "allowPrivateNetworks": {
+        "label": "Allow devices on private networks",
+        "description": "ADB devices usually sit on your LAN. Turn this off to refuse hosts that resolve to private, loopback or link-local addresses."
       }
     },
     "host": {
-      "enableAdb": { "label": "ADB" },
-      "adbPort": { "label": "ADB port" }
+      "enableAdb": {
+        "label": "ADB",
+        "description": "Open an Android shell over ADB (TCP) on this host."
+      },
+      "adbPort": {
+        "label": "ADB port",
+        "description": "The port adbd listens on. After \"adb tcpip 5555\" on the device it is 5555."
+      }
     }
   },
   "adb": {
@@ -32,6 +46,8 @@
     "reconnect": "Reconnect",
     "closed": "Session ended",
     "exitCode": "Session ended with exit code {{code}}",
-    "error": "Connection failed"
+    "error": "Connection failed",
+    "pasteRefused": "Paste blocked by the browser. Use Ctrl+V",
+    "refused": "This address is not allowed (private network access is off)"
   }
 }

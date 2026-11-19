@@ -1,6 +1,10 @@
 import type { IncomingMessage } from "node:http";
 import type { PluginContext } from "@termix-ssh/plugin-sdk/backend";
 import type { WebSocket } from "ws";
+import {
+  resolveTarget,
+  TargetRefusedError,
+} from "@termix-ssh/plugin-sdk/net-guard";
 import { adbKeyFromPem, generateAdbKey, type AdbKey } from "./adb-key.js";
 import { openAdbShell, type AdbShell } from "./adb-protocol.js";
 
@@ -55,6 +59,12 @@ export function activate(ctx: PluginContext): void {
     return keyPromise;
   };
 
+  // Core's status dot pings a host on its protocol's own port, not the SSH one.
+  ctx.hosts.status.registerPort("adb", async (hostId) => {
+    const port = await ctx.settings.getHost<number>(hostId, "adbPort");
+    return port || DEFAULT_PORT;
+  });
+
   ctx.ws.route("/shell", async (connection) => {
     const ws = connection.socket as WebSocket;
     const request = connection.request as IncomingMessage;
@@ -79,6 +89,12 @@ export function activate(ctx: PluginContext): void {
     // Queue what arrives while the device is still being reached.
     let shell: AdbShell | null = null;
     let closed = false;
+    // Counts this session for the host's online indicator until it ends.
+    let releaseSession: (() => void) | null = null;
+    const endSession = () => {
+      releaseSession?.();
+      releaseSession = null;
+    };
     const early: { data?: Buffer; size?: [number, number] }[] = [];
     ws.on("message", (raw, isBinary) => {
       if (isBinary) {
@@ -105,10 +121,12 @@ export function activate(ctx: PluginContext): void {
     });
     ws.on("close", () => {
       closed = true;
+      endSession();
       shell?.close();
     });
     ws.on("error", () => {
       closed = true;
+      endSession();
       shell?.close();
     });
 
@@ -131,12 +149,19 @@ export function activate(ctx: PluginContext): void {
       const port =
         (await ctx.settings.getHost<number>(hostId, "adbPort")) || DEFAULT_PORT;
       target = `${host.ip}:${port}`;
+      // The device is a saved host, so its address is not request input; an
+      // admin can still forbid private ranges. Connect to the checked address.
+      const allowPrivate =
+        (await ctx.settings.get<boolean>("allowPrivateNetworks")) !== false;
+      const resolved = await resolveTarget(host.ip, {
+        allowPrivateHosts: allowPrivate ? [host.ip] : [],
+      });
       const key = await loadKey();
       if (closed) return;
 
       shell = await openAdbShell(
         {
-          host: host.ip,
+          host: resolved.address,
           port,
           privateKeyPem: key.privateKeyPem,
           publicKey: key.publicKey,
@@ -149,6 +174,7 @@ export function activate(ctx: PluginContext): void {
           },
           onPhase: (phase) => say({ type: "phase", phase }),
           onClose: ({ exitCode, error }) => {
+            endSession();
             if (error) say({ type: "error", message: error });
             else say({ type: "exit", code: exitCode });
             ws.close(CLOSE_NORMAL);
@@ -163,6 +189,7 @@ export function activate(ctx: PluginContext): void {
         if (item.data) shell.write(item.data);
         if (item.size) shell.resize(item.size[0], item.size[1]);
       }
+      releaseSession = ctx.hosts.trackSession(hostId);
       await ctx.audit.record({
         action: "adb_shell_open",
         resourceType: "host",
@@ -170,11 +197,13 @@ export function activate(ctx: PluginContext): void {
         resourceName: host.name ?? host.ip,
         details: `ADB shell to ${target}`,
         success: true,
-        request,
       });
-      ctx.hosts.trackSession(hostId);
     } catch (error) {
-      const message = errorText(error);
+      endSession();
+      const message =
+        error instanceof TargetRefusedError
+          ? "This address is not allowed (private network access is off)"
+          : errorText(error);
       ctx.log.warn(
         `ADB connection to ${target || `host ${hostId}`} failed: ${message}`,
       );
@@ -186,7 +215,6 @@ export function activate(ctx: PluginContext): void {
           details: `ADB shell to ${target || `host ${hostId}`}`,
           success: false,
           errorMessage: message,
-          request,
         })
         .catch(() => undefined);
       refuse(message, CLOSE_ERROR);

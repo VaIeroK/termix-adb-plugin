@@ -1,7 +1,7 @@
 {
   "name": "@termix-plugin/adb",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "build": "termix-plugin build",
@@ -18,7 +18,7 @@
     "lucide-react": "^1.33.0"
   },
   "devDependencies": {
-    "@termix-ssh/plugin-sdk": "^1.1.6",
+    "@termix-ssh/plugin-sdk": "^2.10.1",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^26.2.0",
@@ -38,7 +38,7 @@
     "ws": "^8.23.0"
   },
   "peerDependencies": {
-    "@termix-ssh/plugin-sdk": "^1.1.6",
+    "@termix-ssh/plugin-sdk": "^2.0.0",
     "react": "^19.2.8",
     "react-i18next": "^17.0.14",
     "ws": "^8.18.0"

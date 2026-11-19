@@ -52,6 +52,7 @@ async function setup(options: {
   settings?: Record<string, unknown>;
   hosts?: PluginHostSummary[];
   permissions?: string[];
+  adminSettings?: Record<string, unknown>;
 }) {
   const mock = createMockCtx({
     pluginId: manifest.id,
@@ -59,9 +60,13 @@ async function setup(options: {
     capabilities: manifest.capabilities,
     hosts: options.hosts ?? [host],
     permissions: options.permissions,
+    sandbox: true,
   });
   for (const [key, value] of Object.entries(options.settings ?? {})) {
     await mock.ctx.settings.setHost(5, key, value);
+  }
+  for (const [key, value] of Object.entries(options.adminSettings ?? {})) {
+    await mock.ctx.settings.set(key, value);
   }
   await activate(mock.ctx);
   mock.setActor("user-1");
@@ -140,6 +145,21 @@ describe("/shell route", () => {
     expect(socket.closed).not.toBeNull();
   });
 
+  it("refuses private addresses when the admin turned that off", async () => {
+    const device = await startDevice();
+    devices.push(device);
+    const { open } = await setup({
+      settings: { enableAdb: true, adbPort: device.port },
+      adminSettings: { allowPrivateNetworks: false },
+    });
+    const socket = await open("hostId=5");
+    expect(socket.json.at(-1)).toMatchObject({
+      type: "error",
+      message: expect.stringContaining("not allowed"),
+    });
+    expect(device.trusted).toHaveLength(0);
+  });
+
   it("refuses a bad host id", async () => {
     const { open } = await setup({});
     const socket = await open("hostId=abc");
@@ -153,5 +173,45 @@ describe("/shell route", () => {
     const socket = await open("hostId=5");
     expect(socket.json.at(-1)).toMatchObject({ type: "error" });
     expect(socket.closed?.code).toBe(1011);
+  });
+
+  it("counts the session for the online indicator until it ends", async () => {
+    const device = await startDevice();
+    devices.push(device);
+    const { mock, open } = await setup({
+      settings: { enableAdb: true, adbPort: device.port },
+    });
+    const socket = await open("hostId=5");
+    expect(mock.trackedSessions).toEqual([5]);
+    socket.emit("close");
+    expect(mock.trackedSessions).toEqual([]);
+  });
+
+  it("releases the count when the shell ends by itself", async () => {
+    const device = await startDevice();
+    devices.push(device);
+    const { mock, open } = await setup({
+      settings: { enableAdb: true, adbPort: device.port },
+    });
+    const socket = await open("hostId=5");
+    expect(mock.trackedSessions).toEqual([5]);
+    socket.emit("message", Buffer.from("exit\n"), true);
+    await until(() => socket.closed !== null);
+    expect(mock.trackedSessions).toEqual([]);
+  });
+
+  it("does not count a refused connection", async () => {
+    const { mock, open } = await setup({ settings: { enableAdb: false } });
+    await open("hostId=5");
+    expect(mock.trackedSessions).toEqual([]);
+  });
+
+  it("tells core which port to ping for the status dot", async () => {
+    const { mock } = await setup({ settings: { adbPort: 4444 } });
+    const resolve = mock.statusPorts.get("adb");
+    expect(resolve).toBeTypeOf("function");
+    expect(await resolve?.(5)).toBe(4444);
+    // A host that never set a port falls back to the ADB default.
+    expect(await resolve?.(99)).toBe(5555);
   });
 });
