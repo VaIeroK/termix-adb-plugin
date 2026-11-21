@@ -1,7 +1,7 @@
 {
   "id": "adb",
   "name": "ADB",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "An Android shell over ADB in your browser. Termix speaks the ADB protocol itself, so the server needs no adb binary.",
   "author": {
     "name": "ValeroK"
@@ -34,10 +34,7 @@
         "id": "adb",
         "titleKey": "hosts.tabAdb",
         "icon": "Smartphone",
-        "openFrom": [
-          "host-context-menu",
-          "palette"
-        ]
+        "openFrom": ["host-context-menu", "palette"]
       }
     ],
     "protocols": [
@@ -52,10 +49,7 @@
         "name": "sessions",
         "titleKey": "permissions.sessions.title",
         "descriptionKey": "permissions.sessions.description",
-        "defaultRoles": [
-          "admin",
-          "user"
-        ]
+        "defaultRoles": ["admin", "user"]
       }
     ],
     "settings": {
@@ -78,6 +72,14 @@
       "host": {
         "fields": [
           {
+            "key": "enableAdb",
+            "type": "boolean",
+            "labelKey": "settings.host.enableAdb.label",
+            "default": false,
+            "hidden": true,
+            "defaultable": false
+          },
+          {
             "key": "adbPort",
             "type": "number",
             "labelKey": "settings.host.adbPort.label",
@@ -85,21 +87,13 @@
             "max": 65535,
             "default": 5555,
             "defaultable": false,
-            "descriptionKey": "settings.host.adbPort.description"
+            "descriptionKey": "settings.host.adbPort.description",
+            "hidden": true
           }
-        ],
-        "enableKey": "enableAdb",
-        "enableLabelKey": "settings.host.enableAdb.label",
-        "enableDescriptionKey": "settings.host.enableAdb.description",
-        "editorGroup": "top",
-        "editorOrder": 125
+        ]
       }
     }
   },
   "locales": "locales",
-  "platforms": [
-    "linux",
-    "win32",
-    "darwin"
-  ]
+  "platforms": ["linux", "win32", "darwin"]
 }

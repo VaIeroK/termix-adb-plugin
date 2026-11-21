@@ -25,3 +25,14 @@ export async function shellSocketUrl(
   url.searchParams.set("rows", String(rows));
   return { url: url.toString(), protocols: target.protocols };
 }
+
+/** The URL of the pairing socket for one host. */
+export async function pairSocketUrl(
+  hostId: string,
+): Promise<{ url: string; protocols?: string[] } | null> {
+  const target = await adbApp().wsUrl("/pair");
+  if (!target) return null;
+  const url = new URL(target.url);
+  url.searchParams.set("hostId", hostId);
+  return { url: url.toString(), protocols: target.protocols };
+}

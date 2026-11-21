@@ -34,7 +34,7 @@
       },
       "adbPort": {
         "label": "ADB port",
-        "description": "The port adbd listens on. After \"adb tcpip 5555\" on the device it is 5555."
+        "description": "The port adbd listens on: 5555 after \"adb tcpip 5555\", or the connect port shown on the Wireless debugging screen (Android 11+)."
       }
     }
   },
@@ -48,6 +48,12 @@
     "exitCode": "Session ended with exit code {{code}}",
     "error": "Connection failed",
     "pasteRefused": "Paste blocked by the browser. Use Ctrl+V",
-    "refused": "This address is not allowed (private network access is off)"
+    "refused": "This address is not allowed (private network access is off)",
+    "pairHelp": "This phone uses Wireless debugging and does not know this server yet. On the phone open Wireless debugging → Pair device with pairing code, then enter the pairing port and the 6-digit code shown there (not the connect port).",
+    "pairPort": "Pairing port",
+    "pairCode": "6-digit code",
+    "pair": "Pair",
+    "pairing": "Pairing...",
+    "notPaired": "This phone is not paired with this server yet."
   }
 }

@@ -2,7 +2,7 @@
 
 An Android `adb shell` tab for [Termix](https://github.com/Termix-SSH/Termix), as a plugin. The stock Docker image is enough: Termix speaks the ADB protocol itself over TCP, with RSA authentication, `shell_v2` with a PTY and live resize, and a fallback to the old shell for devices without `shell_v2`.
 
-See [docs/index.md](docs/index.md) for device setup and use.
+Android 11+ phones with Wireless debugging are supported too (pairing by code, then ADB over TLS). See [docs/index.md](docs/index.md) for device setup and use.
 
 ## Compatibility
 
@@ -30,7 +30,7 @@ The version in `manifest.json` is the one Termix shows. Keep the newest `CHANGEL
 ## Build (any system)
 
 ```bash
-npm install --legacy-peer-deps
+npm install
 npm run typecheck
 npm test           # protocol tests against a fake adbd, route tests, terminal and frame tests
 npm run build
@@ -39,18 +39,24 @@ npm run pack       # writes adb-<version>.tmxplug
 node scripts/set-version.mjs 1.0.2   # what set-version.bat runs
 ```
 
-`--legacy-peer-deps` is needed because the SDK lists its peers loosely. The plugin SDK must be version 2 or newer: the frame and sandbox tests do not exist in SDK 1.
+The plugin SDK must be version 2 or newer: the frame and sandbox tests do not exist in SDK 1. CI installs with `npm ci`, so keep `package-lock.json` in sync with `package.json` (run `npm install` after changing a dependency and commit the lock).
+
+## Release and the community registry
+
+The repository follows the Termix plugin template: `.github/workflows/release.yml` and `ci.yml` call the shared Termix-Registry workflows. Run the Release workflow from a `dev-X.Y.Z` branch (stable) or as a beta. It publishes `adb-<version>.tmxplug` as a GitHub release and prints the version and `sha256` in the run summary. That `sha256` is the one to submit to the community registry (a pull request to Termix-SSH/Termix-Registry adding `community/plugins/adb.json`).
+
+`build.bat` also prints the SHA-256 of the file it packed and writes it next to the package as `adb-<version>.tmxplug.sha256`. Use it to check a local build, not for the registry: the registry checks the file the workflow built.
 
 ## Layout
 
-| Path | What it is |
-| --- | --- |
-| `manifest.json` | Id, version, capabilities, settings, tab and protocol |
-| `authz.json` | The route table for the plugin's WebSocket, checked by Termix's authz tests |
-| `src/backend/adb-protocol.ts` | The ADB wire protocol and shell client |
-| `src/backend/adb-key.ts` | The RSA key and Android public key encoding |
-| `src/backend/index.ts` | The `/shell` WebSocket route, access checks, status port, session count |
-| `src/frontend/` | The terminal tab and the plugin registration |
-| `locales/` | Texts |
-| `tests/` | Backend tests against a fake device, frontend and frame tests |
-| `scripts/set-version.mjs` | Used by `set-version.bat` |
+| Path                          | What it is                                                                  |
+| ----------------------------- | --------------------------------------------------------------------------- |
+| `manifest.json`               | Id, version, capabilities, settings, tab and protocol                       |
+| `authz.json`                  | The route table for the plugin's WebSocket, checked by Termix's authz tests |
+| `src/backend/adb-protocol.ts` | The ADB wire protocol and shell client                                      |
+| `src/backend/adb-key.ts`      | The RSA key and Android public key encoding                                 |
+| `src/backend/index.ts`        | The `/shell` WebSocket route, access checks, status port, session count     |
+| `src/frontend/`               | The terminal tab and the plugin registration                                |
+| `locales/`                    | Texts                                                                       |
+| `tests/`                      | Backend tests against a fake device, frontend and frame tests               |
+| `scripts/set-version.mjs`     | Used by `set-version.bat`                                                   |

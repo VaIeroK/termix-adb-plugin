@@ -27,6 +27,9 @@ const h = vi.hoisted(() => {
     getSelection() {
       return this.selection;
     }
+    clearSelection() {
+      this.selection = "";
+    }
     attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
       this.keyHandler = handler;
     }
@@ -146,7 +149,11 @@ describe("AdbTab paste and copy", () => {
     term.paste.mockClear();
     await new Promise((r) => setTimeout(r, 350));
     container.dispatchEvent(
-      new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }),
+      new MouseEvent("auxclick", {
+        bubbles: true,
+        cancelable: true,
+        button: 1,
+      }),
     );
     await vi.waitFor(() => expect(term.paste).toHaveBeenCalledWith("ls"));
 
@@ -178,6 +185,7 @@ describe("AdbTab paste and copy", () => {
     container.dispatchEvent(menu);
     expect(menu.defaultPrevented).toBe(true);
     expect(writeText).toHaveBeenCalledWith("selected text");
+    expect(term.hasSelection()).toBe(false);
     await new Promise((r) => setTimeout(r, 50));
     expect(readText).not.toHaveBeenCalled();
     expect(term.paste).not.toHaveBeenCalled();
@@ -194,6 +202,9 @@ describe("AdbTab paste and copy", () => {
     term.selection = "hello";
     expect(term.keyHandler!(key({ key: "c", ctrlKey: true }))).toBe(false);
     expect(writeText).toHaveBeenCalledWith("hello");
+    // Copying drops the selection, so the next Ctrl+C interrupts again.
+    expect(term.hasSelection()).toBe(false);
+    expect(term.keyHandler!(key({ key: "c", ctrlKey: true }))).toBe(true);
 
     term.selection = "";
     expect(

@@ -9,7 +9,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import xtermCss from "@xterm/xterm/css/xterm.css?inline";
 import { useTranslation, type TabProps } from "@termix-ssh/plugin-sdk/frontend";
-import { shellSocketUrl } from "./app";
+import { pairSocketUrl, shellSocketUrl } from "./app";
 
 type Status = "connecting" | "authorizing" | "ready" | "closed" | "error";
 
@@ -18,6 +18,7 @@ interface ServerMessage {
   phase?: "connecting" | "authorizing" | "ready";
   code?: number;
   message?: string;
+  needsPairing?: boolean;
 }
 
 // Shows which route a paste took. Set false once the touchpad tap is sorted.
@@ -51,6 +52,12 @@ export function AdbTab({
   const [detail, setDetail] = useState("");
   // A short note when a clipboard read is refused, with the reason.
   const [notice, setNotice] = useState("");
+  // Set when the phone is on Wireless debugging and does not know this server.
+  const [needsPairing, setNeedsPairing] = useState(false);
+  const [pairPort, setPairPort] = useState("");
+  const [pairCode, setPairCode] = useState("");
+  const [pairBusy, setPairBusy] = useState(false);
+  const [pairError, setPairError] = useState("");
   // Bumped to start a fresh connection.
   const [attempt, setAttempt] = useState(0);
 
@@ -116,6 +123,9 @@ export function AdbTab({
       const selected = term.getSelection();
       if (selected) {
         void navigator.clipboard?.writeText(selected).catch(() => undefined);
+        // Like the SSH terminal: the selection goes away once it is copied.
+        // The cursor stays where it was.
+        term.clearSelection();
       }
     };
     term.attachCustomKeyEventHandler((event) => {
@@ -230,6 +240,7 @@ export function AdbTab({
     let finished = false;
     setStatus("connecting");
     setDetail("");
+    setNeedsPairing(false);
     term.reset();
 
     const data = term.onData((input) => {
@@ -277,6 +288,7 @@ export function AdbTab({
               finished = true;
               setStatus("error");
               setDetail(message.message || t("adb.error"));
+              setNeedsPairing(message.needsPairing === true);
             }
             return;
           }
@@ -321,6 +333,50 @@ export function AdbTab({
   }, [isVisible, isFocusedPane, fit]);
 
   const reconnect = useCallback(() => setAttempt((n) => n + 1), []);
+
+  const submitPairing = useCallback(async () => {
+    if (pairBusy) return;
+    setPairBusy(true);
+    setPairError("");
+    try {
+      const target = await pairSocketUrl(hostId);
+      if (!target) throw new Error(t("adb.error"));
+      await new Promise<void>((resolve, reject) => {
+        const socket = new WebSocket(target.url, target.protocols);
+        let settled = false;
+        const settle = (error?: string) => {
+          if (settled) return;
+          settled = true;
+          if (error === undefined) resolve();
+          else reject(new Error(error));
+        };
+        socket.onopen = () =>
+          socket.send(
+            JSON.stringify({ port: Number(pairPort), code: pairCode.trim() }),
+          );
+        socket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(String(event.data)) as ServerMessage;
+            if (message.type === "paired") settle();
+            else if (message.type === "error") {
+              settle(message.message || t("adb.error"));
+            }
+          } catch {
+            // Not for us.
+          }
+        };
+        socket.onerror = () => settle(t("adb.error"));
+        socket.onclose = () => settle(t("adb.error"));
+      });
+      setPairCode("");
+      setNeedsPairing(false);
+      reconnect();
+    } catch (error) {
+      setPairError(error instanceof Error ? error.message : t("adb.error"));
+    } finally {
+      setPairBusy(false);
+    }
+  }, [hostId, pairBusy, pairCode, pairPort, reconnect, t]);
   useImperativeHandle(
     handleRef,
     () => ({
@@ -337,7 +393,9 @@ export function AdbTab({
         ? t("adb.connecting")
         : status === "authorizing"
           ? t("adb.authorizing")
-          : detail || t("adb.closed");
+          : needsPairing
+            ? t("adb.notPaired")
+            : detail || t("adb.closed");
   const ended = status === "closed" || status === "error";
 
   return (
@@ -372,44 +430,126 @@ export function AdbTab({
       )}
       {banner && (
         <div
-          role="status"
           style={{
             position: "absolute",
             top: 12,
             right: 12,
-            maxWidth: "min(480px, 80%)",
-            padding: "8px 12px",
-            borderRadius: 8,
-            fontSize: 13,
-            color: status === "error" ? "#fecaca" : "#e4e4e7",
-            background:
-              status === "error"
-                ? "rgba(127,29,29,0.9)"
-                : "rgba(39,39,42,0.92)",
+            width: "min(480px, 80%)",
             display: "flex",
-            gap: 12,
-            alignItems: "center",
+            flexDirection: "column",
+            gap: 8,
+            alignItems: "flex-end",
           }}
+          onMouseDown={(event) => event.stopPropagation()}
         >
-          <span>{banner}</span>
-          {ended && (
-            <button
-              type="button"
-              onClick={reconnect}
+          <div
+            role="status"
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              fontSize: 13,
+              color: status === "error" ? "#fecaca" : "#e4e4e7",
+              background:
+                status === "error"
+                  ? "rgba(127,29,29,0.9)"
+                  : "rgba(39,39,42,0.92)",
+              display: "flex",
+              gap: 12,
+              alignItems: "center",
+            }}
+          >
+            <span>{banner}</span>
+            {ended && !needsPairing && (
+              <button
+                type="button"
+                onClick={reconnect}
+                style={{
+                  padding: "3px 10px",
+                  borderRadius: 6,
+                  border: "1px solid rgba(255,255,255,0.3)",
+                  background: "transparent",
+                  color: "inherit",
+                  cursor: "pointer",
+                }}
+              >
+                {t("adb.reconnect")}
+              </button>
+            )}
+          </div>
+          {needsPairing && ended && (
+            <div
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void submitPairing();
+              }}
               style={{
-                padding: "3px 10px",
-                borderRadius: 6,
-                border: "1px solid rgba(255,255,255,0.3)",
-                background: "transparent",
-                color: "inherit",
-                cursor: "pointer",
+                width: "100%",
+                boxSizing: "border-box",
+                padding: 12,
+                borderRadius: 8,
+                fontSize: 13,
+                color: "#e4e4e7",
+                background: "rgba(39,39,42,0.96)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
               }}
             >
-              {t("adb.reconnect")}
-            </button>
+              <div>{t("adb.pairHelp")}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  inputMode="numeric"
+                  placeholder={t("adb.pairPort")}
+                  value={pairPort}
+                  onChange={(e) =>
+                    setPairPort(e.target.value.replace(/\D/g, ""))
+                  }
+                  style={inputStyle}
+                  aria-label={t("adb.pairPort")}
+                />
+                <input
+                  inputMode="numeric"
+                  placeholder={t("adb.pairCode")}
+                  value={pairCode}
+                  maxLength={6}
+                  onChange={(e) =>
+                    setPairCode(e.target.value.replace(/\D/g, ""))
+                  }
+                  style={inputStyle}
+                  aria-label={t("adb.pairCode")}
+                />
+                <button
+                  type="button"
+                  onClick={() => void submitPairing()}
+                  disabled={pairBusy || !pairPort || pairCode.length !== 6}
+                  style={buttonStyle}
+                >
+                  {pairBusy ? t("adb.pairing") : t("adb.pair")}
+                </button>
+              </div>
+              {pairError && <div style={{ color: "#fecaca" }}>{pairError}</div>}
+            </div>
           )}
         </div>
       )}
     </div>
   );
 }
+
+const inputStyle = {
+  flex: 1,
+  minWidth: 0,
+  padding: "4px 8px",
+  borderRadius: 6,
+  border: "1px solid rgba(255,255,255,0.3)",
+  background: "rgba(0,0,0,0.4)",
+  color: "inherit",
+} as const;
+
+const buttonStyle = {
+  padding: "4px 12px",
+  borderRadius: 6,
+  border: "1px solid rgba(255,255,255,0.3)",
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+} as const;

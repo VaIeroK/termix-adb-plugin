@@ -12,6 +12,17 @@ adb tcpip 5555
 
 It listens on port 5555 until the device restarts. Android 11+ "Wireless debugging" is not supported: it uses TLS and a random port with pairing. Use `adb tcpip` instead.
 
+If the device shows a "Wireless debugging" screen with an IP, a port such as 33235 and a pairing code (Android 11 and newer, including Xiaomi HyperOS), that port does not speak the plain ADB this plugin uses, so the connection ends with "The device did not answer in time". Connect the device by USB once, run `adb tcpip 5555`, and use port 5555.
+
+## Android 11+ Wireless debugging (Xiaomi, Pixel and others)
+
+Phones with **Developer options → Wireless debugging** do not use `adb tcpip`. They have two ports:
+
+1. The **connect port** (the one under the IP address on the Wireless debugging screen, it changes on every restart). Put it in the host's ADB port.
+2. The **pairing port**, shown only on the "Pair device with pairing code" screen, with a 6-digit code.
+
+Steps: add the host with the phone's IP and the connect port, open the ADB tab and connect. The phone does not know the server yet, so the tab shows a form. On the phone open "Pair device with pairing code", enter the pairing port and the code in the form, and press Pair. The tab then reconnects by itself. Keep the pairing screen open on the phone until you press Pair. Pairing is done once per server and phone; the phone remembers the key. If the phone is on the same Wi-Fi only, the Termix server must be on that network too.
+
 ## Add a host
 
 1. Open a host in Manage, or make a new one. Use the device's IP address.

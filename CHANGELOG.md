@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.0
+
+### Added
+
+- Android 11+ Wireless debugging. Pair a phone with the pairing code from the ADB tab (pairing port + 6-digit code), then connect on the connect port from the Wireless debugging screen. The pairing protocol (SPAKE2) and the TLS upgrade are implemented in the plugin; the server still needs no adb binary.
+- Russian strings for the pairing form.
+
+### Changed
+
+- The host editor no longer has a second "ADB" switch: the protocol switch is the only one. The ADB port has its own "ADB" tab in the host editor, shown without turning on Advanced.
+
+### Fixed
+
+- Copying (Ctrl+C or a tap) drops the selection.
+
 ## 1.0.1
 
 ### Changed

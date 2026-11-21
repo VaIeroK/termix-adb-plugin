@@ -4,6 +4,7 @@ import type {
   TermixApp,
 } from "@termix-ssh/plugin-sdk/frontend";
 import { AdbTab } from "./AdbTab";
+import { HostAdbSection } from "./HostAdbSection";
 import { setAdbApp } from "./app";
 
 const PLUGIN_ID = "adb";
@@ -32,6 +33,18 @@ export function activate(app: TermixApp): void {
     descriptionKey: "hosts.adbDescription",
     icon: Smartphone,
     order: 125,
+  });
+
+  app.registerHostEditorSection({
+    id: PLUGIN_ID,
+    group: "top",
+    titleKey: "hosts.tabAdb",
+    icon: Smartphone,
+    order: 25,
+    visible: (protocols) => !!protocols.enableAdb,
+    // Without this the tab waits behind the editor's Advanced switch.
+    ...{ simple: true },
+    component: HostAdbSection,
   });
 
   app.registerHostAction({

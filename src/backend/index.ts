@@ -6,7 +6,12 @@ import {
   TargetRefusedError,
 } from "@termix-ssh/plugin-sdk/net-guard";
 import { adbKeyFromPem, generateAdbKey, type AdbKey } from "./adb-key.js";
-import { openAdbShell, type AdbShell } from "./adb-protocol.js";
+import {
+  AdbPairingRequiredError,
+  openAdbShell,
+  type AdbShell,
+} from "./adb-protocol.js";
+import { PairingError, pairWithDevice } from "./pairing.js";
 
 const DEFAULT_PORT = 5555;
 const CLOSE_POLICY = 1008;
@@ -16,7 +21,8 @@ const CLOSE_ERROR = 1011;
 type ServerMessage =
   | { type: "phase"; phase: "connecting" | "authorizing" | "ready" }
   | { type: "exit"; code?: number }
-  | { type: "error"; message: string };
+  | { type: "paired" }
+  | { type: "error"; message: string; needsPairing?: boolean };
 
 function clampInt(
   value: string | null,
@@ -72,8 +78,12 @@ export function activate(ctx: PluginContext): void {
     const say = (message: ServerMessage) => {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
     };
-    const refuse = (message: string, code = CLOSE_POLICY) => {
-      say({ type: "error", message });
+    const refuse = (
+      message: string,
+      code = CLOSE_POLICY,
+      needsPairing = false,
+    ) => {
+      say({ type: "error", message, needsPairing });
       ws.close(code, message.slice(0, 120));
     };
 
@@ -217,7 +227,105 @@ export function activate(ctx: PluginContext): void {
           errorMessage: message,
         })
         .catch(() => undefined);
-      refuse(message, CLOSE_ERROR);
+      refuse(message, CLOSE_ERROR, error instanceof AdbPairingRequiredError);
     }
+  });
+
+  // Android 11+ "Pair device with pairing code". The code is sent in the first
+  // message, never in the URL, so it stays out of access logs.
+  ctx.ws.route("/pair", async (connection) => {
+    const ws = connection.socket as WebSocket;
+    const request = connection.request as IncomingMessage;
+    const say = (message: ServerMessage) => {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+    };
+    const refuse = (message: string, code = CLOSE_POLICY) => {
+      say({ type: "error", message });
+      ws.close(code, message.slice(0, 120));
+    };
+    const url = new URL(request.url ?? "", "http://localhost");
+    const hostId = Number.parseInt(url.searchParams.get("hostId") ?? "", 10);
+    if (!Number.isInteger(hostId) || hostId <= 0) {
+      refuse("Missing host");
+      return;
+    }
+
+    let started = false;
+    ws.on("error", () => undefined);
+    ws.on("message", (raw) => {
+      if (started) return;
+      started = true;
+      void (async () => {
+        let target = `host ${hostId}`;
+        try {
+          const message = JSON.parse(String(raw)) as {
+            port?: number;
+            code?: string;
+          };
+          const port = Number(message.port);
+          if (!Number.isInteger(port) || port < 1 || port > 65535) {
+            refuse("Enter the pairing port from the phone");
+            return;
+          }
+          const access = await ctx.hosts.checkAccess(hostId, "connect");
+          if (!access.hasAccess || !(await ctx.rbac.has("sessions"))) {
+            refuse("You can't connect to this host");
+            return;
+          }
+          const host = await ctx.hosts.get(hostId);
+          if (!host) {
+            refuse("Host not found");
+            return;
+          }
+          if (!(await ctx.settings.getHost<boolean>(hostId, "enableAdb"))) {
+            refuse("ADB is off for this host");
+            return;
+          }
+          target = `${host.ip}:${port}`;
+          const allowPrivate =
+            (await ctx.settings.get<boolean>("allowPrivateNetworks")) !== false;
+          const resolved = await resolveTarget(host.ip, {
+            allowPrivateHosts: allowPrivate ? [host.ip] : [],
+          });
+          const key = await loadKey();
+          await pairWithDevice({
+            host: resolved.address,
+            port,
+            code: String(message.code ?? ""),
+            privateKeyPem: key.privateKeyPem,
+            publicKey: key.publicKey,
+          });
+          await ctx.audit.record({
+            action: "adb_pair",
+            resourceType: "host",
+            resourceId: String(hostId),
+            resourceName: host.name ?? host.ip,
+            details: `ADB pairing with ${target}`,
+            success: true,
+          });
+          say({ type: "paired" });
+          ws.close(CLOSE_NORMAL);
+        } catch (error) {
+          const text =
+            error instanceof TargetRefusedError
+              ? "This address is not allowed (private network access is off)"
+              : errorText(error);
+          if (!(error instanceof PairingError)) {
+            ctx.log.warn(`ADB pairing with ${target} failed: ${text}`);
+          }
+          await ctx.audit
+            .record({
+              action: "adb_pair",
+              resourceType: "host",
+              resourceId: String(hostId),
+              details: `ADB pairing with ${target}`,
+              success: false,
+              errorMessage: text,
+            })
+            .catch(() => undefined);
+          refuse(text, CLOSE_ERROR);
+        }
+      })();
+    });
   });
 }

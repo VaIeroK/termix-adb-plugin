@@ -1,5 +1,7 @@
 import net from "node:net";
+import tls from "node:tls";
 import { constants, privateEncrypt } from "node:crypto";
+import { selfSignedCertificate } from "./x509.js";
 
 /**
  * A small ADB client: the transport and shell services of the ADB protocol
@@ -17,6 +19,9 @@ export const A_OPEN = 0x4e45504f;
 export const A_OKAY = 0x59414b4f;
 export const A_CLSE = 0x45534c43;
 export const A_WRTE = 0x45545257;
+/** Android 11+ wireless debugging: "switch this connection to TLS". */
+export const A_STLS = 0x534c5453;
+export const A_STLS_VERSION = 0x01000000;
 
 export const AUTH_TOKEN = 1;
 export const AUTH_SIGNATURE = 2;
@@ -135,6 +140,9 @@ export function parseFeatures(banner: string): string[] {
   return match ? match[1].split(",").filter(Boolean) : [];
 }
 
+/** The phone is on Wireless debugging and does not know this server's key. */
+export class AdbPairingRequiredError extends Error {}
+
 export type AdbPhase = "connecting" | "authorizing" | "ready";
 
 export interface AdbShellHandlers {
@@ -183,9 +191,12 @@ export function openAdbShell(
   const term = (options.term ?? "xterm-256color").replace(/[^\w.-]/g, "");
 
   return new Promise<AdbShell>((resolve, reject) => {
-    const socket = net.connect({ host: options.host, port: options.port });
-    socket.setNoDelay(true);
-    socket.setKeepAlive(true, 30_000);
+    const rawSocket = net.connect({ host: options.host, port: options.port });
+    rawSocket.setNoDelay(true);
+    rawSocket.setKeepAlive(true, 30_000);
+    // Replaced by a TLS socket when the device asks for the TLS upgrade.
+    let socket: net.Socket | tls.TLSSocket = rawSocket;
+    let secured = false;
 
     let received: Buffer = Buffer.alloc(0);
     let shellBuffer: Buffer = Buffer.alloc(0);
@@ -223,15 +234,30 @@ export function openAdbShell(
         socket.write(encodeMessage(command, arg0, arg1, data));
     };
 
-    function finish(info: { error?: string }) {
+    function finish(info: { error?: string; needsPairing?: boolean }) {
       if (finished) return;
       finished = true;
       clearTimer();
       socket.destroy();
+      rawSocket.destroy();
       if (opened) handlers.onClose({ exitCode, error: info.error });
-      else reject(new Error(info.error ?? "The device closed the connection"));
+      else {
+        const message = info.error ?? "The device closed the connection";
+        reject(
+          info.needsPairing
+            ? new AdbPairingRequiredError(message)
+            : new Error(message),
+        );
+      }
     }
     function fail(error: Error) {
+      if (secured && !opened) {
+        finish({
+          error: `The device did not accept this server's key (${error.message}). Pair it first: Wireless debugging → Pair device with pairing code`,
+          needsPairing: true,
+        });
+        return;
+      }
       finish({ error: error.message });
     }
 
@@ -319,6 +345,11 @@ export function openAdbShell(
           }
           return;
         }
+        case A_STLS: {
+          if (secured) return;
+          upgradeToTls();
+          return;
+        }
         case A_CNXN: {
           const banner = message.data.toString("utf8");
           const features = parseFeatures(banner);
@@ -366,7 +397,50 @@ export function openAdbShell(
       }
     }
 
-    socket.on("connect", () => {
+    function upgradeToTls() {
+      secured = true;
+      send(A_STLS, A_STLS_VERSION, 0);
+      const plain = socket;
+      plain.removeAllListeners("data");
+      plain.removeAllListeners("error");
+      plain.removeAllListeners("close");
+      received = Buffer.alloc(0);
+      // adbd only looks at the certificate's public key, which must be one
+      // it has paired.
+      const secure = tls.connect({
+        socket: plain,
+        cert: selfSignedCertificate(options.privateKeyPem),
+        key: options.privateKeyPem,
+        minVersion: "TLSv1.3",
+        rejectUnauthorized: false,
+      });
+      socket = secure;
+      attach(secure);
+      handlers.onPhase?.("authorizing");
+    }
+
+    function attach(stream: net.Socket | tls.TLSSocket) {
+      stream.on("data", (chunk) => {
+        try {
+          received = Buffer.concat([received, chunk as Buffer]);
+          const { messages, rest } = parseMessages(received);
+          received = rest;
+          for (const message of messages) handle(message);
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+      stream.on("error", (error) => fail(error));
+      stream.on("close", () => {
+        if (secured && !opened && !finished) {
+          fail(new Error("the connection was closed during the TLS handshake"));
+        } else {
+          finish({});
+        }
+      });
+    }
+
+    rawSocket.on("connect", () => {
       handlers.onPhase?.("connecting");
       send(
         A_CNXN,
@@ -375,17 +449,6 @@ export function openAdbShell(
         Buffer.from("host::features=shell_v2,cmd\0"),
       );
     });
-    socket.on("data", (chunk) => {
-      try {
-        received = Buffer.concat([received, chunk as Buffer]);
-        const { messages, rest } = parseMessages(received);
-        received = rest;
-        for (const message of messages) handle(message);
-      } catch (error) {
-        fail(error instanceof Error ? error : new Error(String(error)));
-      }
-    });
-    socket.on("error", (error) => fail(error));
-    socket.on("close", () => finish({}));
+    attach(rawSocket);
   });
 }

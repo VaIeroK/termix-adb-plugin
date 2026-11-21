@@ -5,10 +5,12 @@
     "WS /plugin-ws/adb/shell": {
       "access": "user",
       "permission": "adb.sessions",
-      "resource": {
-        "kind": "host",
-        "min": "connect"
-      },
+      "allowed": "any",
+      "note": "Checks host access and the sessions permission itself; the test data has no ADB host"
+    },
+    "WS /plugin-ws/adb/pair": {
+      "access": "user",
+      "permission": "adb.sessions",
       "allowed": "any",
       "note": "Checks host access and the sessions permission itself; the test data has no ADB host"
     }

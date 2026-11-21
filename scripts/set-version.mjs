@@ -1,9 +1,32 @@
 // Sets the plugin version (and optionally engine ranges) everywhere it lives.
-// Usage: node scripts/set-version.mjs <version> [termixRange] [apiRange]
+// Without arguments it asks; an empty answer keeps the current value.
+// Usage: node scripts/set-version.mjs [version [termixRange [apiRange]]]
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 
-const [version, termix, api] = process.argv.slice(2);
-if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version ?? "")) {
+const VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+let [version, termix, api] = process.argv.slice(2);
+
+if (version === undefined) {
+  const current = JSON.parse(readFileSync("manifest.json", "utf8"));
+  const rl = createInterface({ input: process.stdin });
+  const lines = rl[Symbol.asyncIterator]();
+  const ask = async (label, value) => {
+    process.stdout.write(`${label} [${value}]: `);
+    const { value: line } = await lines.next();
+    return (line ?? "").trim() || value;
+  };
+  console.log(`Current plugin version: ${current.version}`);
+  console.log(`Current engine.termix:  ${current.engine.termix}`);
+  console.log(`Current engine.api:     ${current.engine.api}`);
+  console.log("(Press Enter to keep the current value)\n");
+  version = await ask("New plugin version", current.version);
+  termix = await ask("New engine.termix", current.engine.termix);
+  api = await ask("New engine.api", current.engine.api);
+  rl.close();
+}
+
+if (!VERSION.test(version ?? "")) {
   console.error(`Bad version "${version ?? ""}". Use x.y.z, for example 1.0.2`);
   process.exit(1);
 }
@@ -35,7 +58,9 @@ if (existsSync("package-lock.json")) {
 
 if (existsSync("CHANGELOG.md")) {
   let text = readFileSync("CHANGELOG.md", "utf8");
-  if (!new RegExp(`^## ${version.replace(/\./g, "\\.")}\\s*$`, "m").test(text)) {
+  if (
+    !new RegExp(`^## ${version.replace(/\./g, "\\.")}\\s*$`, "m").test(text)
+  ) {
     text = text.replace(
       /^# Changelog\s*\n/,
       `# Changelog\n\n## ${version}\n\n### Changed\n\n- TODO: describe this release\n\n`,
@@ -47,7 +72,10 @@ if (existsSync("CHANGELOG.md")) {
 
 if (existsSync("README.md")) {
   const text = readFileSync("README.md", "utf8");
-  const next = text.replace(/adb-\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?\.tmxplug/g, `adb-${version}.tmxplug`);
+  const next = text.replace(
+    /adb-\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?\.tmxplug/g,
+    `adb-${version}.tmxplug`,
+  );
   if (next !== text) {
     writeFileSync("README.md", next);
     changed.push("README.md");

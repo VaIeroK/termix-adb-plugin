@@ -5,6 +5,7 @@ import type { PluginHostSummary } from "@termix-ssh/plugin-sdk/backend";
 import manifest from "../../manifest.json" with { type: "json" };
 import { activate } from "../../src/backend/index.js";
 import { startDevice, until, type FakeDevice } from "./fake-device.js";
+import { startWirelessDevice, type FakeWireless } from "./fake-wireless.js";
 
 class FakeSocket extends EventEmitter {
   readonly OPEN = 1;
@@ -43,7 +44,7 @@ const host: PluginHostSummary = {
   authType: "none",
 };
 
-const devices: FakeDevice[] = [];
+const devices: (FakeDevice | FakeWireless)[] = [];
 afterEach(async () => {
   await Promise.all(devices.splice(0).map((d) => d.close()));
 });
@@ -72,6 +73,21 @@ async function setup(options: {
   mock.setActor("user-1");
   const route = mock.wsRoutes.find((r) => r.path === "/shell");
   if (!route?.handler) throw new Error("no /shell route");
+  const pairRoute = mock.wsRoutes.find((r) => r.path === "/pair");
+  const pair = async (query: string, message: unknown) => {
+    const socket = new FakeSocket();
+    await pairRoute!.handler!({
+      userId: "user-1",
+      request: { url: `/plugin-ws/adb/pair?${query}` },
+      socket,
+      clientIp: "127.0.0.1",
+      requestOrigin: "http://localhost",
+      isDataUnlocked: () => true,
+    } as never);
+    socket.emit("message", Buffer.from(JSON.stringify(message)), false);
+    await until(() => socket.closed !== null, 8000);
+    return socket;
+  };
   const open = async (query: string) => {
     const socket = new FakeSocket();
     await route.handler!({
@@ -84,8 +100,46 @@ async function setup(options: {
     } as never);
     return socket;
   };
-  return { mock, open };
+  return { mock, open, pair };
 }
+
+describe("wireless debugging routes", () => {
+  it(
+    "asks for pairing, pairs, then opens the shell over TLS",
+    { timeout: 30_000 },
+    async () => {
+      const phone = await startWirelessDevice("135790");
+      devices.push(phone);
+      const { open, pair } = await setup({
+        settings: { enableAdb: true, adbPort: phone.connectPort },
+      });
+
+      const first = await open("hostId=5");
+
+      expect(first.json.at(-1)).toMatchObject({
+        type: "error",
+        needsPairing: true,
+      });
+
+      const wrong = await pair("hostId=5", {
+        port: phone.pairingPort,
+        code: "000000",
+      });
+
+      expect(wrong.json.at(-1)).toMatchObject({ type: "error" });
+
+      const ok = await pair("hostId=5", {
+        port: phone.pairingPort,
+        code: "135790",
+      });
+      expect(ok.json.at(-1)).toMatchObject({ type: "paired" });
+
+      const shell = await open("hostId=5");
+      expect(shell.json.map((m) => m.phase).filter(Boolean)).toContain("ready");
+      shell.emit("close");
+    },
+  );
+});
 
 describe("/shell route", () => {
   it("opens a shell, relays bytes both ways and stores one key", async () => {
