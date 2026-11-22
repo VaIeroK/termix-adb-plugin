@@ -12,6 +12,7 @@ import {
   type AdbShell,
 } from "./adb-protocol.js";
 import { PairingError, pairWithDevice } from "./pairing.js";
+import { registerFilesRoute } from "./files-route.js";
 
 const DEFAULT_PORT = 5555;
 const CLOSE_POLICY = 1008;
@@ -70,6 +71,8 @@ export function activate(ctx: PluginContext): void {
     const port = await ctx.settings.getHost<number>(hostId, "adbPort");
     return port || DEFAULT_PORT;
   });
+
+  registerFilesRoute(ctx, loadKey);
 
   ctx.ws.route("/shell", async (connection) => {
     const ws = connection.socket as WebSocket;

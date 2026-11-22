@@ -36,3 +36,29 @@ export async function pairSocketUrl(
   url.searchParams.set("hostId", hostId);
   return { url: url.toString(), protocols: target.protocols };
 }
+
+/** The URL of the file manager socket for one host. */
+export async function filesSocketUrl(
+  hostId: string,
+): Promise<{ url: string; protocols?: string[] } | null> {
+  const target = await adbApp().wsUrl("/files");
+  if (!target) return null;
+  const url = new URL(target.url);
+  url.searchParams.set("hostId", hostId);
+  return { url: url.toString(), protocols: target.protocols };
+}
+
+/** The link a one time download ticket is fetched from. */
+export async function downloadUrl(ticket: string): Promise<string | null> {
+  const target = await adbApp().wsUrl("/files");
+  if (!target) return null;
+  const url = new URL(target.url);
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  url.search = "";
+  url.hash = "";
+  url.pathname = url.pathname.replace(
+    /\/plugin-ws\/([^/]+)\/files$/,
+    `/plugin-api/$1/download/${encodeURIComponent(ticket)}`,
+  );
+  return url.toString();
+}

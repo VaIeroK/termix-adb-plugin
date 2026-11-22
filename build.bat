@@ -10,7 +10,9 @@ if errorlevel 1 (
 )
 
 echo [0/7] Installing dependencies (SDK 2.x required)...
-call npm install
+rem npm ci, not npm install: on Windows install rewrites package-lock.json and
+rem drops the optional entries of other platforms, which breaks npm ci in CI.
+call npm ci
 if errorlevel 1 goto fail
 node -e "const v=require('./node_modules/@termix-ssh/plugin-sdk/package.json').version;if(parseInt(v)<2){console.error('Old SDK '+v+' installed. Delete node_modules and package-lock.json, run again.');process.exit(1)}"
 if errorlevel 1 goto fail

@@ -8,7 +8,8 @@
     "adbDescription": "Оболочка Android через ADB (TCP)"
   },
   "palette": {
-    "connectAdb": "Подключиться по ADB"
+    "connectAdb": "Подключиться по ADB",
+    "openAdbFiles": "Открыть файлы ADB"
   },
   "permissions": {
     "sessions": {
@@ -55,5 +56,39 @@
     "pair": "Сопрячь",
     "pairing": "Сопряжение...",
     "notPaired": "Этот телефон ещё не сопряжён с этим сервером."
+  },
+  "files": {
+    "title": "Файлы ADB",
+    "up": "Вверх",
+    "home": "Хранилище",
+    "refresh": "Обновить",
+    "path": "Путь",
+    "newFolder": "Новая папка",
+    "upload": "Загрузить",
+    "download": "Скачать",
+    "rename": "Переименовать",
+    "delete": "Удалить",
+    "cancel": "Отмена",
+    "name": "Имя",
+    "size": "Размер",
+    "modified": "Изменён",
+    "empty": "Папка пуста",
+    "done": "Готово",
+    "folderName": "Имя папки",
+    "newName": "Новое имя",
+    "confirmDelete": "Удалить выбранное ({{count}}) с устройства? Это нельзя отменить.",
+    "pairFirst": "Откройте вкладку ADB этого хоста и сначала сопрягите телефон.",
+    "items": "элементов",
+    "downloadStarted": "Передано браузеру",
+    "save": "Сохранить",
+    "saved": "Сохранено",
+    "close": "Закрыть",
+    "permissions": "Права",
+    "apply": "Применить",
+    "permissionsSet": "Права изменены",
+    "discard": "Отменить несохранённые изменения?",
+    "discardYes": "Отменить",
+    "permissionsHint": "Права, например 644",
+    "recursive": "Включая содержимое"
   }
 }

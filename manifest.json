@@ -1,7 +1,7 @@
 {
   "id": "adb",
   "name": "ADB",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "An Android shell over ADB in your browser. Termix speaks the ADB protocol itself, so the server needs no adb binary.",
   "author": {
     "name": "ValeroK"
@@ -34,6 +34,12 @@
         "id": "adb",
         "titleKey": "hosts.tabAdb",
         "icon": "Smartphone",
+        "openFrom": ["host-context-menu", "palette"]
+      },
+      {
+        "id": "adb-files",
+        "titleKey": "files.title",
+        "icon": "FolderSearch",
         "openFrom": ["host-context-menu", "palette"]
       }
     ],

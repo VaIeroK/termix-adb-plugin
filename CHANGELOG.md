@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+
+- File manager for the phone: the "ADB Files" tab (host menu and command palette) browses the device over the ADB sync protocol. List folders, upload (button or drag and drop), download, rename, create folders, delete, with progress and cancel. Starts in `/sdcard`. Files and folders download (a folder or several items arrive as one streamed `.zip`); uploading folders isn't supported yet.
+- Text editor in the file manager: double click a text file to edit it with line numbers, save (button or Ctrl+S), download and change permissions (chmod). Files up to 2 MB, UTF-8 only; the file keeps its permissions on save.
+- The file list shows permissions (`rwxr-xr-x`, octal in the tooltip), and the "Permissions" button changes them for any selected files or folders, binary ones included, with an option to include folder contents.
+- Rubber band selection in the file list: hold the left mouse button and drag to select the files under the frame (Ctrl or Shift adds to the selection). The list no longer selects page text.
+
+### Fixed
+
+- CI vulnerability scan failed on `glob` and `minimatch` pulled in by the plugin SDK's dev dependencies. They are now pinned to patched versions with npm `overrides` (build tooling only, not part of the plugin).
+- `build.bat` installs with `npm ci` instead of `npm install`. On Windows `npm install` rewrote `package-lock.json` without the optional `@emnapi/*` entries, and CI (`npm ci` on Linux) then failed with "lock file out of sync".
+
 ## 1.1.0
 
 ### Added

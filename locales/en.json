@@ -8,7 +8,8 @@
     "adbDescription": "Android shell over ADB (TCP)"
   },
   "palette": {
-    "connectAdb": "Connect with ADB"
+    "connectAdb": "Connect with ADB",
+    "openAdbFiles": "Open ADB files"
   },
   "permissions": {
     "sessions": {
@@ -55,5 +56,39 @@
     "pair": "Pair",
     "pairing": "Pairing...",
     "notPaired": "This phone is not paired with this server yet."
+  },
+  "files": {
+    "title": "ADB Files",
+    "up": "Up",
+    "home": "Storage",
+    "refresh": "Refresh",
+    "path": "Path",
+    "newFolder": "New folder",
+    "upload": "Upload",
+    "download": "Download",
+    "rename": "Rename",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "name": "Name",
+    "size": "Size",
+    "modified": "Modified",
+    "empty": "This folder is empty",
+    "done": "Done",
+    "folderName": "Folder name",
+    "newName": "New name",
+    "confirmDelete": "Delete {{count}} selected item(s) from the device? This cannot be undone.",
+    "pairFirst": "Open the ADB tab of this host and pair the phone first.",
+    "items": "items",
+    "downloadStarted": "Sent to the browser",
+    "save": "Save",
+    "saved": "Saved",
+    "close": "Close",
+    "permissions": "Permissions",
+    "apply": "Apply",
+    "permissionsSet": "Permissions changed",
+    "discard": "Discard unsaved changes?",
+    "discardYes": "Discard",
+    "permissionsHint": "Permissions, e.g. 644",
+    "recursive": "Include contents"
   }
 }

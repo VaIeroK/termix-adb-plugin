@@ -56,6 +56,7 @@ async function setup(options: {
   adminSettings?: Record<string, unknown>;
 }) {
   const mock = createMockCtx({
+    router: () => ({ get: () => undefined }),
     pluginId: manifest.id,
     manifest: manifest as never,
     capabilities: manifest.capabilities,

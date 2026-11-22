@@ -1,9 +1,10 @@
-import { Smartphone } from "lucide-react";
+import { FolderSearch, Smartphone } from "lucide-react";
 import type {
   PluginHostRecord,
   TermixApp,
 } from "@termix-ssh/plugin-sdk/frontend";
 import { AdbTab } from "./AdbTab";
+import { FilesTab } from "./FilesTab";
 import { HostAdbSection } from "./HostAdbSection";
 import { setAdbApp } from "./app";
 
@@ -58,6 +59,28 @@ export function activate(app: TermixApp): void {
     when: adbEnabled,
   });
 
+  app.registerHostAction({
+    id: "adb-files",
+    titleKey: "files.title",
+    icon: FolderSearch,
+    kind: "open",
+    order: 126,
+    tabType: "adb-files",
+    when: adbEnabled,
+  });
+
+  app.registerPaletteEntry({
+    id: "adb.files",
+    titleKey: "palette.openAdbFiles",
+    icon: FolderSearch,
+    keywords: ["adb", "android", "files"],
+    scope: "host",
+    when: (host) => !!host && adbEnabled(host),
+    run: (shell, host) => {
+      if (host) shell.openTab(host, "adb-files");
+    },
+  });
+
   app.registerPaletteEntry({
     id: "adb.connect",
     titleKey: "palette.connectAdb",
@@ -81,5 +104,16 @@ export function activate(app: TermixApp): void {
     ownBackground: true,
     restore: adbEnabled,
     activityTypes: [PLUGIN_ID],
+  });
+
+  app.registerTab("adb-files", FilesTab, {
+    icon: FolderSearch,
+    titleKey: "files.title",
+    requiresHost: true,
+    noHostMessageKey: "adb.noHostSelected",
+    persistent: true,
+    session: true,
+    commandTarget: false,
+    restore: adbEnabled,
   });
 }

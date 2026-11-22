@@ -13,6 +13,19 @@
       "permission": "adb.sessions",
       "allowed": "any",
       "note": "Checks host access and the sessions permission itself; the test data has no ADB host"
+    },
+    "WS /plugin-ws/adb/files": {
+      "access": "user",
+      "permission": "adb.sessions",
+      "allowed": "any",
+      "note": "Checks host access and the sessions permission itself; the test data has no ADB host"
+    },
+    "GET /plugin-api/adb/download/:ticket": {
+      "access": "public",
+      "note": "A one time, one minute, random ticket issued to a checked file manager socket is the credential",
+      "expect": {
+        "anon": "any"
+      }
     }
   }
 }

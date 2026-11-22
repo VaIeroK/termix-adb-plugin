@@ -23,6 +23,10 @@ Phones with **Developer options → Wireless debugging** do not use `adb tcpip`.
 
 Steps: add the host with the phone's IP and the connect port, open the ADB tab and connect. The phone does not know the server yet, so the tab shows a form. On the phone open "Pair device with pairing code", enter the pairing port and the code in the form, and press Pair. The tab then reconnects by itself. Keep the pairing screen open on the phone until you press Pair. Pairing is done once per server and phone; the phone remembers the key. If the phone is on the same Wi-Fi only, the Termix server must be on that network too.
 
+## File manager
+
+Open **ADB Files** from the host's menu (or the command palette). It lists the phone's storage starting at `/sdcard`; type another path in the address bar to go elsewhere (some folders, like `/data`, need root). Double click opens a folder, or a text file in the built-in editor (line numbers, Save or Ctrl+S, Download, and permissions as octal digits like `644`; files up to 2 MB, UTF-8 text only). The list has a permissions column; select one or more items and press **Permissions** to set them as octal digits (for folders you can include the contents). Use the Download button on the toolbar to download from the list. Upload with the button or by dragging files onto the list. Select with clicks (Ctrl and Shift extend) or by dragging a frame with the left mouse button. Rename (F2), delete (Delete key, asks first) and new folder work on the device directly. Download works for files, folders and a multi-selection (several items or a folder arrive as one `.zip`, built on the fly; symbolic links are skipped). The browser saves it to its usual downloads folder: the plugin runs in a sandbox and can't open a "save as" dialog, so turn on "Ask where to save each file" in the browser settings if you want one. Uploading folders isn't supported yet.
+
 ## Add a host
 
 1. Open a host in Manage, or make a new one. Use the device's IP address.

@@ -13,6 +13,7 @@ describe("frontend", () => {
       manifest: manifest as never,
     });
     expect(app.registered.tabs()).toContain("adb");
+    expect(app.registered.tabs()).toContain("adb-files");
     expect(app.registered.hostProtocols()).toContain("adb");
     expect(app.registered.hostActions().map((a) => a.id)).toContain("adb");
   });
@@ -26,7 +27,13 @@ describe("frontend", () => {
       app.registered.hostActionsFor(on as never).map((a) => a.id),
     ).toContain("adb");
     expect(
+      app.registered.hostActionsFor(on as never).map((a) => a.id),
+    ).toContain("adb-files");
+    expect(
       app.registered.hostActionsFor(off as never).map((a) => a.id),
     ).not.toContain("adb");
+    expect(
+      app.registered.hostActionsFor(off as never).map((a) => a.id),
+    ).not.toContain("adb-files");
   });
 });
