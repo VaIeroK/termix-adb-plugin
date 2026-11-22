@@ -25,15 +25,22 @@ export function formatSize(bytes: number): string {
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }
 
-/** Folders first, then by name, case blind. */
-export function sortItems(items: FileItem[]): FileItem[] {
-  return [...items].sort((a, b) =>
-    a.dir === b.dir
-      ? a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-      : a.dir
-        ? -1
-        : 1,
-  );
+export type SortKey = "name" | "mode" | "size" | "mtime";
+
+/** Folders first, then by the chosen column; names compare case blind. */
+export function sortItems(
+  items: FileItem[],
+  key: SortKey = "name",
+  descending = false,
+): FileItem[] {
+  const byName = (a: FileItem, b: FileItem) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  const direction = descending ? -1 : 1;
+  return [...items].sort((a, b) => {
+    if (a.dir !== b.dir) return a.dir ? -1 : 1;
+    const diff = key === "name" ? byName(a, b) : a[key] - b[key];
+    return diff !== 0 ? diff * direction : byName(a, b);
+  });
 }
 
 /** Permission bits as "rwxr-xr--". */
@@ -46,4 +53,15 @@ export function modeText(mode: number): string {
 /** Permission bits as octal digits, like "644". */
 export function modeOctal(mode: number): string {
   return (mode & 0o777).toString(8).padStart(3, "0");
+}
+
+/** "20.08.24, 16:59": short enough for the narrow column, locale order. */
+export function shortDate(seconds: number): string {
+  return new Date(seconds * 1000).toLocaleString(undefined, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

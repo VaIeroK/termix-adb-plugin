@@ -212,6 +212,45 @@ export async function startFilesDevice(
             }
           }
         }
+      } else if (bin === "pm") {
+        output = paths[0]?.includes("bad")
+          ? "Failure [INSTALL_FAILED_INVALID_APK]"
+          : "Success";
+      } else if (bin === "reboot") {
+        // Nothing comes back from a device that is going down.
+      } else if (bin === "cp" && paths.length === 2) {
+        for (const key of [...device.files.keys()]) {
+          if (key === paths[0] || key.startsWith(`${paths[0]}/`)) {
+            device.files.set(
+              paths[1] + key.slice(paths[0].length),
+              device.files.get(key)!,
+            );
+          }
+        }
+      } else if (bin === "find") {
+        const term = (args[args.indexOf("-iname") + 1] ?? "")
+          .replace(/\\(.)/g, "$1")
+          .replace(/^\*|\*$/g, "")
+          .toLowerCase();
+        output = [...device.files.entries()]
+          .filter(
+            ([key]) =>
+              key.startsWith(`${paths[0]}/`) &&
+              key
+                .slice(key.lastIndexOf("/") + 1)
+                .toLowerCase()
+                .includes(term),
+          )
+          .map(([key, file]) =>
+            [
+              file.dir ? "directory" : "regular file",
+              "644",
+              file.data?.length ?? 0,
+              file.mtime,
+              key,
+            ].join("|"),
+          )
+          .join("\n");
       } else if (bin === "chmod") {
         // Recorded in `commands`; the fake keeps no permission bits.
       } else if (bin === "mkdir") {

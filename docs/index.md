@@ -10,7 +10,7 @@ ADB must listen on TCP. Connect the device by USB once and run:
 adb tcpip 5555
 ```
 
-It listens on port 5555 until the device restarts. Android 11+ "Wireless debugging" is not supported: it uses TLS and a random port with pairing. Use `adb tcpip` instead.
+It listens on port 5555 until the device restarts. For Android 11+ "Wireless debugging" (TLS, random port, pairing) see the next section.
 
 If the device shows a "Wireless debugging" screen with an IP, a port such as 33235 and a pairing code (Android 11 and newer, including Xiaomi HyperOS), that port does not speak the plain ADB this plugin uses, so the connection ends with "The device did not answer in time". Connect the device by USB once, run `adb tcpip 5555`, and use port 5555.
 
@@ -23,9 +23,27 @@ Phones with **Developer options → Wireless debugging** do not use `adb tcpip`.
 
 Steps: add the host with the phone's IP and the connect port, open the ADB tab and connect. The phone does not know the server yet, so the tab shows a form. On the phone open "Pair device with pairing code", enter the pairing port and the code in the form, and press Pair. The tab then reconnects by itself. Keep the pairing screen open on the phone until you press Pair. Pairing is done once per server and phone; the phone remembers the key. If the phone is on the same Wi-Fi only, the Termix server must be on that network too.
 
+The port changes every time Wireless debugging is switched off and on. The phone still trusts the server then, so no new pairing is needed: when a connection fails on a phone that has connected before, the tab shows a field for the new port. Enter it and the plugin saves it to the host and reconnects.
+
 ## File manager
 
-Open **ADB Files** from the host's menu (or the command palette). It lists the phone's storage starting at `/sdcard`; type another path in the address bar to go elsewhere (some folders, like `/data`, need root). Double click opens a folder, or a text file in the built-in editor (line numbers, Save or Ctrl+S, Download, and permissions as octal digits like `644`; files up to 2 MB, UTF-8 text only). The list has a permissions column; select one or more items and press **Permissions** to set them as octal digits (for folders you can include the contents). Use the Download button on the toolbar to download from the list. Upload with the button or by dragging files onto the list. Select with clicks (Ctrl and Shift extend) or by dragging a frame with the left mouse button. Rename (F2), delete (Delete key, asks first) and new folder work on the device directly. Download works for files, folders and a multi-selection (several items or a folder arrive as one `.zip`, built on the fly; symbolic links are skipped). The browser saves it to its usual downloads folder: the plugin runs in a sandbox and can't open a "save as" dialog, so turn on "Ask where to save each file" in the browser settings if you want one. Uploading folders isn't supported yet.
+Open **ADB Files** from the host's menu (or the command palette). It lists the phone's storage starting at `/sdcard`; type another path in the address bar to go elsewhere (some folders, like `/data`, need root). A line under the list shows the phone's name, Android version, battery (left out when there is none) and free space.
+
+- **Select:** click, Ctrl or Shift for several, or hold the left mouse button and drag a frame. Ctrl+A selects all.
+- **Open:** double click a folder to enter it, or a text file to edit it. The editor has line numbers, Save (or Ctrl+S), Download and permissions as octal digits like `644`. It opens UTF-8 text up to 2 MB.
+- **Right click** a file for the actions: open or edit, install (for an APK), download, copy, cut, paste (also into a folder), rename, permissions and delete. On empty space: paste, new folder, upload, refresh. Ctrl+C, Ctrl+X, Ctrl+V, F2 and Delete work too. Copy and move never overwrite an existing name.
+- **Permissions** show as a column (`rwxr-xr-x`, octal in the tooltip). The menu entry changes them for any selection, binary files included; for folders you can include the contents.
+- **Upload:** the buttons, or drag files and folders into the list. Dropping on a folder row uploads into that folder. Folders keep their structure.
+- **Move:** drag selected rows onto a folder (hold Ctrl to copy).
+- **Download:** files, folders or a selection. Several items or a folder arrive as one `.zip`, built on the fly (symbolic links are skipped). The browser saves it to its usual downloads folder: the plugin runs in a sandbox and can't open a "save as" dialog, so turn on "Ask where to save each file" in the browser settings if you want one.
+- **Sort:** click a column header; click again to reverse. Folders stay on top.
+- **Search:** the search field (or Ctrl+F) looks for names in the current folder and below, up to 500 results. Results behave like the list.
+- **Hidden files:** the eye button shows or hides dotfiles.
+- **Install an APK:** right click the `.apk`, Install. The plugin copies it to a temporary file in `/data/local/tmp`, installs it and removes the copy, because Android's package manager can't read `/sdcard` directly.
+
+## Power
+
+The **Power** button on the host row (next to ADB and ADB Files) offers Reboot, Recovery, Bootloader and Power off, and asks to confirm before it acts.
 
 ## Add a host
 

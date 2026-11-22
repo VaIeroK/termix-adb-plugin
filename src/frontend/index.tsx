@@ -1,4 +1,4 @@
-import { FolderSearch, Smartphone } from "lucide-react";
+import { FolderSearch, Power, Smartphone } from "lucide-react";
 import type {
   PluginHostRecord,
   TermixApp,
@@ -6,7 +6,8 @@ import type {
 import { AdbTab } from "./AdbTab";
 import { FilesTab } from "./FilesTab";
 import { HostAdbSection } from "./HostAdbSection";
-import { setAdbApp } from "./app";
+import { adbApp, setAdbApp } from "./app";
+import { rebootDevice, type RebootMode } from "./power";
 
 const PLUGIN_ID = "adb";
 const DEFAULT_PORT = 5555;
@@ -67,6 +68,50 @@ export function activate(app: TermixApp): void {
     order: 126,
     tabType: "adb-files",
     when: adbEnabled,
+  });
+
+  // The picker is the host row's own; each choice asks again before it acts.
+  const powerItem = (mode: RebootMode) => ({
+    id: mode,
+    label: adbApp().t(`power.${mode}`),
+    run: (host: PluginHostRecord) => {
+      const a = adbApp();
+      void (async () => {
+        const ok = await a.confirm({
+          title: a.t(`power.ask.${mode}`),
+          description: a.t("power.confirm"),
+          confirmLabel: a.t("power.go"),
+          destructive: true,
+        });
+        if (!ok) return;
+        // No toast outside a component, so the outcome is a plain notice.
+        let notice = a.t("power.sent");
+        try {
+          await rebootDevice(String(host.id), mode);
+        } catch (error) {
+          notice = error instanceof Error ? error.message : String(error);
+        }
+        await a.confirm({
+          title: notice,
+          confirmLabel: "OK",
+          cancelLabel: a.t("files.close"),
+          destructive: false,
+        });
+      })();
+    },
+  });
+
+  app.registerHostAction({
+    id: "adb-power",
+    titleKey: "power.title",
+    icon: Power,
+    kind: "open",
+    order: 127,
+    when: adbEnabled,
+    items: () =>
+      (["system", "recovery", "bootloader", "poweroff"] as RebootMode[]).map(
+        powerItem,
+      ),
   });
 
   app.registerPaletteEntry({

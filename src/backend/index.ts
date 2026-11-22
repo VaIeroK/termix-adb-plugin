@@ -12,6 +12,7 @@ import {
   type AdbShell,
 } from "./adb-protocol.js";
 import { PairingError, pairWithDevice } from "./pairing.js";
+import { markPaired } from "./paired.js";
 import { registerFilesRoute } from "./files-route.js";
 
 const DEFAULT_PORT = 5555;
@@ -203,6 +204,7 @@ export function activate(ctx: PluginContext): void {
         if (item.size) shell.resize(item.size[0], item.size[1]);
       }
       releaseSession = ctx.hosts.trackSession(hostId);
+      void markPaired(ctx, hostId);
       await ctx.audit.record({
         action: "adb_shell_open",
         resourceType: "host",
@@ -306,6 +308,7 @@ export function activate(ctx: PluginContext): void {
             details: `ADB pairing with ${target}`,
             success: true,
           });
+          await markPaired(ctx, hostId);
           say({ type: "paired" });
           ws.close(CLOSE_NORMAL);
         } catch (error) {

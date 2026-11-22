@@ -1,29 +1,55 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
+  ClipboardPaste,
   Download,
+  Copy,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  PackagePlus,
+  Scissors,
   File as FileIcon,
   Folder,
   FolderPlus,
   Home,
   Lock,
   Pencil,
+  Search,
+  FolderUp,
+  ChevronDown,
+  ChevronUp,
   RefreshCw,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
-import { useTranslation, type TabProps } from "@termix-ssh/plugin-sdk/frontend";
+import {
+  useToast,
+  useTranslation,
+  type TabProps,
+} from "@termix-ssh/plugin-sdk/frontend";
+import { ContextMenu, type MenuEntry } from "./ContextMenu";
 import { downloadUrl, filesSocketUrl } from "./app";
 import { FileEditor } from "./FileEditor";
-import { FilesClient, type FileItem } from "./files-client";
+import { PortFix } from "./PortFix";
+import {
+  entriesFromDrop,
+  leafDirs,
+  planFromEntries,
+  planFromFiles,
+  type UploadPlan,
+} from "./upload-tree";
+import { FilesClient, type DeviceInfo, type FileItem } from "./files-client";
 import {
   formatSize,
   modeOctal,
   modeText,
   joinPath,
   parentPath,
+  shortDate,
   sortItems,
+  type SortKey,
   START_PATH,
 } from "./files-utils";
 
@@ -81,6 +107,7 @@ function saveBlob(blob: Blob, name: string): void {
 
 export function FilesTab({ host }: TabProps) {
   const { t } = useTranslation();
+  const toast = useToast();
   const hostId = host?.id === undefined ? "" : String(host.id);
   const clientRef = useRef<FilesClient | null>(null);
   const pathRef = useRef(START_PATH);
@@ -100,6 +127,37 @@ export function FilesTab({ host }: TabProps) {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [dragging, setDragging] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    target: FileItem | null;
+  } | null>(null);
+  const [clipboard, setClipboard] = useState<{
+    paths: string[];
+    mode: "copy" | "cut";
+  } | null>(null);
+  const [showHidden, setShowHidden] = useState(() => {
+    try {
+      return localStorage.getItem("adb.showHidden") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [info, setInfo] = useState<DeviceInfo | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDesc, setSortDesc] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const [search, setSearch] = useState<{
+    query: string;
+    truncated: boolean;
+  } | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  // What an in-list drag carries, and the cancel hooks of running uploads.
+  const dragPaths = useRef<string[] | null>(null);
+  const cancelHooks = useRef(new Map<number, () => void>());
+  const infoAt = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const [band, setBand] = useState<{
     x: number;
@@ -113,7 +171,17 @@ export function FilesTab({ host }: TabProps) {
   // Ids for transfers that have no socket id (downloads are plain links).
   const nextLocalId = useRef(-1);
 
-  const sorted = useMemo(() => sortItems(items), [items]);
+  const sorted = useMemo(
+    () =>
+      sortItems(
+        showHidden || search
+          ? items
+          : items.filter((i) => !i.name.startsWith(".")),
+        sortKey,
+        sortDesc,
+      ),
+    [items, showHidden, search, sortKey, sortDesc],
+  );
 
   const load = useCallback(async (target: string) => {
     const client = clientRef.current;
@@ -126,8 +194,16 @@ export function FilesTab({ host }: TabProps) {
       setPath(target);
       setPathInput(target);
       setItems(reply.entries ?? []);
+      setSearch(null);
       setSelected(new Set());
       setAnchorName(null);
+      if (Date.now() - infoAt.current > 15_000) {
+        infoAt.current = Date.now();
+        client
+          .call("info")
+          .then((reply) => setInfo(reply.info ?? null))
+          .catch(() => undefined);
+      }
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error));
       setPathInput(pathRef.current);
@@ -237,40 +313,147 @@ export function FilesTab({ host }: TabProps) {
   );
 
   const upload = useCallback(
-    async (files: File[]) => {
+    async (plan: UploadPlan, destination = pathRef.current) => {
       const client = clientRef.current;
-      if (!client) return;
-      for (const file of files) {
-        const { id, result } = client.upload(
-          joinPath(pathRef.current, file.name),
-          file,
-          (done) => patchTransfer(id, { done }),
-        );
+      if (!client || plan.files.length + plan.dirs.length === 0) return;
+      // One row per dropped item: a folder is one row with its total.
+      const groups = new Map<
+        string,
+        { files: UploadPlan["files"]; dirs: string[]; folder: boolean }
+      >();
+      const group = (top: string, folder: boolean) => {
+        let found = groups.get(top);
+        if (!found) {
+          found = { files: [], dirs: [], folder };
+          groups.set(top, found);
+        }
+        return found;
+      };
+      for (const item of plan.files) {
+        const top = item.rel.split("/")[0];
+        group(top, item.rel.includes("/")).files.push(item);
+      }
+      for (const dir of plan.dirs)
+        group(dir.split("/")[0], true).dirs.push(dir);
+
+      for (const [top, entry] of groups) {
+        const id = nextLocalId.current--;
+        const total = entry.files.reduce((sum, f) => sum + f.file.size, 0);
+        let cancelled = false;
+        let active = 0;
+        cancelHooks.current.set(id, () => {
+          cancelled = true;
+          if (active) clientRef.current?.cancel(active);
+        });
         setTransfers((list) => [
           ...list,
           {
             id,
-            name: file.name,
+            name: entry.folder ? `${top}/` : top,
             kind: "up",
             done: 0,
-            total: file.size,
+            total,
             state: "running",
           },
         ]);
         try {
-          await result;
-          patchTransfer(id, { state: "done", done: file.size });
+          for (const dir of leafDirs({
+            files: entry.files,
+            dirs: entry.dirs,
+          })) {
+            await client.call("mkdir", { path: joinPath(destination, dir) });
+          }
+          let sent = 0;
+          for (const { rel, file } of entry.files) {
+            if (cancelled) throw new Error(t("files.cancelled"));
+            const base = sent;
+            const upload = client.upload(
+              joinPath(destination, rel),
+              file,
+              (done) => patchTransfer(id, { done: base + done }),
+            );
+            active = upload.id;
+            await upload.result;
+            active = 0;
+            sent += file.size;
+          }
+          patchTransfer(id, { state: "done", done: total });
         } catch (error) {
           patchTransfer(id, {
             state: "failed",
             error: error instanceof Error ? error.message : String(error),
           });
+        } finally {
+          cancelHooks.current.delete(id);
         }
       }
       reload();
     },
-    [patchTransfer, reload],
+    [patchTransfer, reload, t],
   );
+
+  // Takes what a drop carries; entries must be read before anything awaits.
+  const uploadDropped = (data: DataTransfer, destination?: string) => {
+    const entries = entriesFromDrop(data);
+    const files = [...data.files];
+    void (async () => {
+      try {
+        const plan = entries
+          ? await planFromEntries(entries)
+          : planFromFiles(files);
+        await upload(plan, destination);
+      } catch (error) {
+        setProblem(error instanceof Error ? error.message : String(error));
+      }
+    })();
+  };
+
+  const moveInto = async (
+    paths: string[],
+    destination: string,
+    copy: boolean,
+  ) => {
+    const client = clientRef.current;
+    if (!client) return;
+    setProblem("");
+    try {
+      for (const from of paths) {
+        const name = from.slice(from.lastIndexOf("/") + 1);
+        if (parentPath(from) === destination) continue;
+        await client.call(copy ? "copy" : "rename", {
+          from,
+          to: joinPath(destination, name),
+        });
+      }
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error));
+    }
+    reload();
+  };
+
+  const runSearch = async () => {
+    const client = clientRef.current;
+    const query = searchText.trim();
+    if (!client || !query) return;
+    setProblem("");
+    setLoading(true);
+    try {
+      const reply = await client.search(pathRef.current, query);
+      setItems(reply.entries);
+      setSelected(new Set());
+      setAnchorName(null);
+      setSearch({ query, truncated: reply.truncated });
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clearSearch = () => {
+    setSearchText("");
+    reload();
+  };
 
   const run = useCallback(
     async (op: string, payload: Record<string, unknown>) => {
@@ -298,6 +481,14 @@ export function FilesTab({ host }: TabProps) {
   const startBand = (event: React.MouseEvent) => {
     const box = listRef.current;
     if (event.button !== 0 || !box) return;
+    // A selected row is dragged instead, to move it into a folder.
+    if (
+      (event.target as HTMLElement).closest?.('tr[draggable="true"]') &&
+      !event.ctrlKey &&
+      !event.shiftKey
+    ) {
+      return;
+    }
     // Leave the scroll bars alone.
     const bounds = box.getBoundingClientRect();
     if (
@@ -399,20 +590,218 @@ export function FilesTab({ host }: TabProps) {
     if (!name || name.includes("/")) return;
     if (prompt.kind === "mkdir") {
       void run("mkdir", { path: joinPath(path, name) });
-    } else if (prompt.target && name !== prompt.target) {
-      void run("rename", {
-        from: joinPath(path, prompt.target),
-        to: joinPath(path, name),
-      });
+    } else if (prompt.target) {
+      const from = joinPath(path, prompt.target);
+      if (name !== from.slice(from.lastIndexOf("/") + 1)) {
+        void run("rename", { from, to: joinPath(parentPath(from), name) });
+      }
     }
     setPrompt(null);
+  };
+
+  const toggleHidden = () => {
+    setShowHidden((value) => {
+      try {
+        localStorage.setItem("adb.showHidden", value ? "0" : "1");
+      } catch {
+        // Not kept between visits.
+      }
+      return !value;
+    });
+    setSelected(new Set());
+  };
+
+  const copySelection = (mode: "copy" | "cut", picked = selectedItems) => {
+    if (picked.length === 0) return;
+    setClipboard({
+      paths: picked.map((item) => joinPath(pathRef.current, item.name)),
+      mode,
+    });
+  };
+
+  // A free name for a copy next to its original: "a (copy).txt", "a (copy 2).txt".
+  const copyName = (name: string) => {
+    const taken = new Set(items.map((i) => i.name));
+    const dot = name.lastIndexOf(".");
+    const [stem, ext] =
+      dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""];
+    for (let n = 1; ; n += 1) {
+      const candidate = `${stem} (${n === 1 ? "copy" : `copy ${n}`})${ext}`;
+      if (!taken.has(candidate)) return candidate;
+    }
+  };
+
+  const paste = async (destination = pathRef.current) => {
+    const client = clientRef.current;
+    if (!client || !clipboard) return;
+    setProblem("");
+    try {
+      for (const from of clipboard.paths) {
+        const name = from.slice(from.lastIndexOf("/") + 1);
+        const sameFolder = parentPath(from) === destination;
+        if (clipboard.mode === "cut" && sameFolder) continue;
+        const target =
+          sameFolder && destination === pathRef.current ? copyName(name) : name;
+        await client.call(clipboard.mode === "copy" ? "copy" : "rename", {
+          from,
+          to: joinPath(destination, target),
+        });
+      }
+      if (clipboard.mode === "cut") setClipboard(null);
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error));
+    }
+    infoAt.current = 0;
+    reload();
+  };
+
+  const install = async (item: FileItem) => {
+    const client = clientRef.current;
+    if (!client) return;
+    toast.info(`${t("files.installing")} ${item.name}`);
+    try {
+      await client.call("install", {
+        path: joinPath(pathRef.current, item.name),
+      });
+      toast.success(`${t("files.installed")}: ${item.name}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const openMenu = (event: React.MouseEvent, item: FileItem | null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (item && !selected.has(item.name)) {
+      setSelected(new Set([item.name]));
+      setAnchorName(item.name);
+    }
+    if (!item) setSelected(new Set());
+    setConfirmDelete(false);
+    setMenu({ x: event.clientX, y: event.clientY, target: item });
+  };
+
+  const menuEntries = (target: FileItem | null): MenuEntry[] => {
+    const hasClipboard = clipboard !== null;
+    if (!target) {
+      return [
+        {
+          id: "paste",
+          label: t("files.paste"),
+          icon: ClipboardPaste,
+          disabled: !hasClipboard,
+          run: () => void paste(),
+        },
+        {
+          id: "mkdir",
+          label: t("files.newFolder"),
+          icon: FolderPlus,
+          separator: true,
+          run: () => setPrompt({ kind: "mkdir", value: "" }),
+        },
+        {
+          id: "upload",
+          label: t("files.upload"),
+          icon: Upload,
+          run: () => fileInput.current?.click(),
+        },
+        {
+          id: "uploadFolder",
+          label: t("files.uploadFolder"),
+          icon: FolderUp,
+          run: () => folderInput.current?.click(),
+        },
+        {
+          id: "refresh",
+          label: t("files.refresh"),
+          icon: RefreshCw,
+          run: reload,
+        },
+      ];
+    }
+    const picked = selectedItems.length > 0 ? selectedItems : [target];
+    const single = picked.length === 1;
+    const entries: MenuEntry[] = [];
+    if (single) {
+      entries.push({
+        id: "open",
+        label: target.dir ? t("files.open") : t("files.edit"),
+        icon: target.dir ? FolderOpen : Pencil,
+        run: () => open(target),
+      });
+      if (!target.dir && /\.apk$/i.test(target.name)) {
+        entries.push({
+          id: "install",
+          label: t("files.install"),
+          icon: PackagePlus,
+          run: () => void install(target),
+        });
+      }
+    }
+    entries.push(
+      {
+        id: "download",
+        label: t("files.download"),
+        icon: Download,
+        separator: true,
+        run: () => void download(picked),
+      },
+      {
+        id: "copy",
+        label: t("files.copy"),
+        icon: Copy,
+        separator: true,
+        run: () => copySelection("copy", picked),
+      },
+      {
+        id: "cut",
+        label: t("files.cut"),
+        icon: Scissors,
+        run: () => copySelection("cut", picked),
+      },
+    );
+    if (single && target.dir && hasClipboard) {
+      entries.push({
+        id: "pasteInto",
+        label: t("files.pasteInto"),
+        icon: ClipboardPaste,
+        run: () => void paste(joinPath(pathRef.current, target.name)),
+      });
+    }
+    entries.push(
+      {
+        id: "rename",
+        label: t("files.rename"),
+        icon: Pencil,
+        separator: true,
+        disabled: !single,
+        run: startRename,
+      },
+      {
+        id: "permissions",
+        label: t("files.permissions"),
+        icon: Lock,
+        run: startChmod,
+      },
+      {
+        id: "delete",
+        label: t("files.delete"),
+        icon: Trash2,
+        danger: true,
+        separator: true,
+        run: () => setConfirmDelete(true),
+      },
+    );
+    return entries;
   };
 
   const startRename = () => {
     if (selectedItems.length === 1) {
       setPrompt({
         kind: "rename",
-        value: selectedItems[0].name,
+        value: selectedItems[0].name.slice(
+          selectedItems[0].name.lastIndexOf("/") + 1,
+        ),
         target: selectedItems[0].name,
       });
     }
@@ -435,6 +824,15 @@ export function FilesTab({ host }: TabProps) {
     else if (event.key === "Backspace") void load(parentPath(path));
     else if (event.key === "Enter" && selectedItems.length === 1)
       open(selectedItems[0]);
+    else if ((event.ctrlKey || event.metaKey) && event.key === "f")
+      searchInput.current?.focus();
+    else if (event.key === "Escape" && search) clearSearch();
+    else if ((event.ctrlKey || event.metaKey) && event.key === "c")
+      copySelection("copy");
+    else if ((event.ctrlKey || event.metaKey) && event.key === "x")
+      copySelection("cut");
+    else if ((event.ctrlKey || event.metaKey) && event.key === "v")
+      void paste();
     else if ((event.ctrlKey || event.metaKey) && event.key === "a") {
       event.preventDefault();
       setSelected(new Set(sorted.map((i) => i.name)));
@@ -459,6 +857,11 @@ export function FilesTab({ host }: TabProps) {
         {needsPairing && (
           <div style={{ marginTop: 8, opacity: 0.8 }}>
             {t("files.pairFirst")}
+          </div>
+        )}
+        {status === "error" && !needsPairing && (
+          <div style={{ marginTop: 12, maxWidth: 420 }}>
+            <PortFix hostId={hostId} onSaved={() => setAttempt((n) => n + 1)} />
           </div>
         )}
         {(status === "error" || status === "closed") && (
@@ -515,13 +918,16 @@ export function FilesTab({ host }: TabProps) {
       onKeyDown={onKeyDown}
       onDragOver={(event) => {
         event.preventDefault();
-        setDragging(true);
+        if (event.dataTransfer.types.includes("Files")) setDragging(true);
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={(event) => {
         event.preventDefault();
         setDragging(false);
-        void upload([...event.dataTransfer.files]);
+        if (event.dataTransfer.types.includes("Files")) {
+          uploadDropped(event.dataTransfer);
+        }
+        dragPaths.current = null;
       }}
     >
       <div
@@ -594,6 +1000,14 @@ export function FilesTab({ host }: TabProps) {
         >
           <Upload size={14} /> {t("files.upload")}
         </button>
+        <button
+          type="button"
+          style={buttonStyle}
+          title={t("files.uploadFolder")}
+          onClick={() => folderInput.current?.click()}
+        >
+          <FolderUp size={14} />
+        </button>
         <input
           ref={fileInput}
           type="file"
@@ -602,41 +1016,74 @@ export function FilesTab({ host }: TabProps) {
           onChange={(event) => {
             const files = [...(event.target.files ?? [])];
             event.target.value = "";
-            void upload(files);
+            void upload(planFromFiles(files));
           }}
         />
+        <input
+          ref={folderInput}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          {...{ webkitdirectory: "", directory: "" }}
+          onChange={(event) => {
+            const files = [...(event.target.files ?? [])];
+            event.target.value = "";
+            void upload(planFromFiles(files));
+          }}
+        />
+        <span style={{ position: "relative", display: "inline-flex" }}>
+          <Search
+            size={13}
+            style={{ position: "absolute", left: 7, top: 7, opacity: 0.6 }}
+          />
+          <input
+            ref={searchInput}
+            value={searchText}
+            placeholder={t("files.search")}
+            aria-label={t("files.search")}
+            onChange={(event) => setSearchText(event.target.value)}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === "Enter") void runSearch();
+              else if (event.key === "Escape") clearSearch();
+            }}
+            style={{
+              width: 150,
+              padding: "4px 8px 4px 25px",
+              borderRadius: 6,
+              border,
+              background: "rgba(128,128,128,0.1)",
+              color: "inherit",
+              font: "inherit",
+            }}
+          />
+        </span>
         <button
           type="button"
           style={buttonStyle}
-          disabled={selectedItems.length === 0}
-          onClick={() => void download(selectedItems)}
+          title={t(showHidden ? "files.hideHidden" : "files.showHidden")}
+          onClick={toggleHidden}
         >
-          <Download size={14} /> {t("files.download")}
+          {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </button>
-        <button
-          type="button"
-          style={buttonStyle}
-          disabled={selectedItems.length !== 1}
-          onClick={startRename}
-        >
-          <Pencil size={14} /> {t("files.rename")}
-        </button>
-        <button
-          type="button"
-          style={buttonStyle}
-          disabled={selectedItems.length === 0}
-          onClick={startChmod}
-        >
-          <Lock size={14} /> {t("files.permissions")}
-        </button>
-        <button
-          type="button"
-          style={buttonStyle}
-          disabled={selectedItems.length === 0}
-          onClick={() => setConfirmDelete(true)}
-        >
-          <Trash2 size={14} /> {t("files.delete")}
-        </button>
+        {clipboard && (
+          <span style={{ fontSize: 12, opacity: 0.75 }}>
+            {clipboard.mode === "copy" ? (
+              <Copy size={12} />
+            ) : (
+              <Scissors size={12} />
+            )}{" "}
+            {clipboard.paths.length}
+            <button
+              type="button"
+              style={{ ...buttonStyle, marginLeft: 4, padding: "2px 4px" }}
+              title={t("files.clearClipboard")}
+              onClick={() => setClipboard(null)}
+            >
+              <X size={12} />
+            </button>
+          </span>
+        )}
       </div>
 
       {prompt && (
@@ -741,9 +1188,35 @@ export function FilesTab({ host }: TabProps) {
         </div>
       )}
 
+      {search && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            padding: "4px 8px",
+            fontSize: 12,
+            borderBottom: border,
+          }}
+        >
+          <span>
+            {t("files.searchResults")} «{search.query}»: {items.length}
+            {search.truncated ? "+" : ""}
+          </span>
+          <button
+            type="button"
+            style={buttonStyle}
+            title={t("files.clearSearch")}
+            onClick={clearSearch}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
       <div
         ref={listRef}
         onMouseDown={startBand}
+        onContextMenu={(event) => openMenu(event, null)}
         onClick={(event) => {
           // A click on empty space clears the selection.
           if (event.target === event.currentTarget && !justDragged.current) {
@@ -770,12 +1243,34 @@ export function FilesTab({ host }: TabProps) {
         >
           <thead>
             <tr style={{ textAlign: "left", opacity: 0.7, fontSize: 11 }}>
-              <th style={cell}>{t("files.name")}</th>
-              <th style={{ ...cell, width: 96 }}>{t("files.permissions")}</th>
-              <th style={{ ...cell, width: 100, textAlign: "right" }}>
-                {t("files.size")}
-              </th>
-              <th style={{ ...cell, width: 160 }}>{t("files.modified")}</th>
+              {(
+                [
+                  ["name", "files.name", {}],
+                  ["mode", "files.permissions", { width: 92 }],
+                  ["size", "files.size", { width: 84, textAlign: "right" }],
+                  ["mtime", "files.modified", { width: 150 }],
+                ] as [SortKey, string, Record<string, unknown>][]
+              ).map(([key, label, extra]) => (
+                <th
+                  key={key}
+                  onClick={() => {
+                    if (sortKey === key) setSortDesc((value) => !value);
+                    else {
+                      setSortKey(key);
+                      setSortDesc(false);
+                    }
+                  }}
+                  style={{ ...cell, ...extra, cursor: "pointer" }}
+                >
+                  {t(label)}
+                  {sortKey === key &&
+                    (sortDesc ? (
+                      <ChevronDown size={11} />
+                    ) : (
+                      <ChevronUp size={11} />
+                    ))}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -785,11 +1280,69 @@ export function FilesTab({ host }: TabProps) {
                 data-name={item.name}
                 onClick={(event) => onRowClick(event, item)}
                 onDoubleClick={() => open(item)}
+                onContextMenu={(event) => openMenu(event, item)}
+                draggable={selected.has(item.name)}
+                onDragStart={(event) => {
+                  const picked = selectedItems.map((i) =>
+                    joinPath(pathRef.current, i.name),
+                  );
+                  dragPaths.current = picked;
+                  event.dataTransfer.effectAllowed = "copyMove";
+                  event.dataTransfer.setData("text/plain", picked.join("\n"));
+                }}
+                onDragEnd={() => {
+                  dragPaths.current = null;
+                  setDropTarget(null);
+                }}
+                onDragOver={(event) => {
+                  if (!item.dir) return;
+                  const internal = dragPaths.current;
+                  const files = event.dataTransfer.types.includes("Files");
+                  if (!internal && !files) return;
+                  const here = joinPath(pathRef.current, item.name);
+                  // Not onto itself or into its own contents.
+                  if (
+                    internal?.some(
+                      (p) => here === p || here.startsWith(`${p}/`),
+                    )
+                  ) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = internal
+                    ? event.ctrlKey
+                      ? "copy"
+                      : "move"
+                    : "copy";
+                  setDropTarget(item.name);
+                }}
+                onDragLeave={() => setDropTarget(null)}
+                onDrop={(event) => {
+                  if (!item.dir) return;
+                  const here = joinPath(pathRef.current, item.name);
+                  const internal = dragPaths.current;
+                  setDropTarget(null);
+                  if (internal) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    dragPaths.current = null;
+                    void moveInto(internal, here, event.ctrlKey);
+                  } else if (event.dataTransfer.types.includes("Files")) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setDragging(false);
+                    uploadDropped(event.dataTransfer, here);
+                  }
+                }}
                 style={{
                   cursor: "default",
-                  background: selected.has(item.name)
-                    ? "rgba(96,165,250,0.25)"
-                    : "transparent",
+                  background:
+                    dropTarget === item.name
+                      ? "rgba(96,165,250,0.45)"
+                      : selected.has(item.name)
+                        ? "rgba(96,165,250,0.25)"
+                        : "transparent",
                 }}
               >
                 <td style={cell}>
@@ -819,10 +1372,15 @@ export function FilesTab({ host }: TabProps) {
                 <td style={{ ...cell, textAlign: "right", opacity: 0.8 }}>
                   {item.dir ? "" : formatSize(item.size)}
                 </td>
-                <td style={{ ...cell, opacity: 0.8 }}>
-                  {item.mtime
-                    ? new Date(item.mtime * 1000).toLocaleString()
-                    : ""}
+                <td
+                  title={
+                    item.mtime
+                      ? new Date(item.mtime * 1000).toLocaleString()
+                      : undefined
+                  }
+                  style={{ ...cell, opacity: 0.8 }}
+                >
+                  {item.mtime ? shortDate(item.mtime) : ""}
                 </td>
               </tr>
             ))}
@@ -875,7 +1433,11 @@ export function FilesTab({ host }: TabProps) {
                 <button
                   type="button"
                   style={buttonStyle}
-                  onClick={() => clientRef.current?.cancel(item.id)}
+                  onClick={() => {
+                    const hook = cancelHooks.current.get(item.id);
+                    if (hook) hook();
+                    else clientRef.current?.cancel(item.id);
+                  }}
                   title={t("files.cancel")}
                 >
                   <X size={12} />
@@ -895,6 +1457,56 @@ export function FilesTab({ host }: TabProps) {
           ))}
         </div>
       )}
+
+      {info && (
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            padding: "4px 8px",
+            borderTop: border,
+            fontSize: 11,
+            opacity: 0.75,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {deviceLine(info, t)}
+        </div>
+      )}
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          entries={menuEntries(menu.target)}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   );
+}
+
+/** One line about the phone: name, Android version, battery and free space. */
+export function deviceLine(
+  info: DeviceInfo,
+  t: (key: string) => string,
+): string {
+  const parts: string[] = [];
+  const name = [info.brand, info.model].filter(Boolean).join(" ");
+  if (name) parts.push(name);
+  if (info.android) {
+    parts.push(
+      `Android ${info.android}${info.sdk ? ` (SDK ${info.sdk})` : ""}`,
+    );
+  }
+  if (info.battery !== null)
+    parts.push(`${t("files.battery")} ${info.battery}%`);
+  if (info.freeBytes !== null && info.totalBytes !== null) {
+    parts.push(
+      `${t("files.free")} ${formatSize(info.freeBytes)} / ${formatSize(info.totalBytes)}`,
+    );
+  }
+  return parts.join("  ·  ");
 }

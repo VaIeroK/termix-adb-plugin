@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createMockCtx } from "@termix-ssh/plugin-sdk/testing";
 import type { PluginHostSummary } from "@termix-ssh/plugin-sdk/backend";
 import manifest from "../../manifest.json" with { type: "json" };
+import {
+  parseInfo,
+  parseSearch,
+  searchPattern,
+} from "../../src/backend/files-route.js";
 import { activate } from "../../src/backend/index.js";
 import { crc32 } from "../../src/backend/zip-stream.js";
 import { until } from "./fake-device.js";
@@ -135,6 +140,8 @@ async function download(ticket: string) {
   return res;
 }
 
+let lastMock: ReturnType<typeof createMockCtx> | null = null;
+
 async function openFiles(device: FakeFilesDevice) {
   downloadHandler = null;
   const mock = createMockCtx({
@@ -152,6 +159,7 @@ async function openFiles(device: FakeFilesDevice) {
   await mock.ctx.settings.setHost(5, "enableAdb", true);
   await mock.ctx.settings.setHost(5, "adbPort", device.port);
   await activate(mock.ctx);
+  lastMock = mock;
   mock.setActor("user-1");
   const route = mock.wsRoutes.find((r) => r.path === "/files");
   if (!route?.handler) throw new Error("no /files route");
@@ -302,6 +310,133 @@ describe("/files route", () => {
     socket.request({ id: 5, op: "read", path: "/sdcard/b.bin" });
     await until(() => socket.reply(5) !== undefined);
     expect(socket.reply(5)).toMatchObject({ ok: false });
+    socket.close();
+  });
+
+  it("remembers a host that connected, for the new port offer", async () => {
+    const device = await startFilesDevice({ "/sdcard": null });
+    devices.push(device);
+    const socket = await openFiles(device);
+    let flag: unknown;
+    for (let i = 0; i < 50 && flag !== true; i += 1) {
+      flag = await lastMock?.ctx.settings.getHost(5, "adbPaired");
+      if (flag !== true) await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(flag).toBe(true);
+    socket.close();
+  });
+
+  it("searches names below a folder", async () => {
+    expect(searchPattern("a*b[1]")).toBe("*a\\*b\\[1\\]*");
+    expect(
+      parseSearch("regular file|644|5|1700000000|/sdcard/x|y.txt\n", "/sdcard"),
+    ).toEqual([
+      {
+        name: "x|y.txt",
+        mode: 0o644,
+        size: 5,
+        mtime: 1700000000,
+        dir: false,
+        link: false,
+      },
+    ]);
+
+    const device = await startFilesDevice({
+      "/sdcard": null,
+      "/sdcard/Docs": null,
+      "/sdcard/Docs/Report.txt": "r",
+      "/sdcard/photo.jpg": "p",
+    });
+    devices.push(device);
+    const socket = await openFiles(device);
+    socket.request({ id: 1, op: "search", path: "/sdcard", query: "REPORT" });
+    await until(() => socket.reply(1) !== undefined);
+    const reply = socket.reply(1) as {
+      ok: boolean;
+      entries: { name: string }[];
+    };
+    expect(reply.ok).toBe(true);
+    expect(reply.entries.map((e) => e.name)).toEqual(["Docs/Report.txt"]);
+    socket.request({ id: 2, op: "search", path: "/sdcard", query: "  " });
+    await until(() => socket.reply(2) !== undefined);
+    expect(socket.reply(2)).toMatchObject({ ok: false });
+    socket.close();
+  });
+
+  it("parses the device info lines", () => {
+    expect(
+      parseInfo(
+        "brand=Xiaomi\nmodel=23127PN0CG\nandroid=15\nsdk=35\npresent=1\nbattery=80\n" +
+          "df=/dev/fuse 250000000 100000000 150000000 40% /storage/emulated\n",
+      ),
+    ).toMatchObject({
+      brand: "Xiaomi",
+      sdk: 35,
+      battery: 80,
+      totalBytes: 250000000 * 1024,
+      freeBytes: 150000000 * 1024,
+    });
+    expect(parseInfo("present=0\nbattery=0")).toMatchObject({ battery: null });
+    expect(parseInfo("junk")).toMatchObject({ model: null, battery: null });
+  });
+
+  it("installs APKs, reboots, copies and refuses to overwrite", async () => {
+    const device = await startFilesDevice({
+      "/sdcard": null,
+      "/sdcard/a.apk": "x",
+      "/sdcard/bad.apk": "x",
+      "/sdcard/n.txt": "text",
+      "/sdcard/Docs": null,
+    });
+    devices.push(device);
+    const socket = await openFiles(device);
+    const ask = async (id: number, payload: Record<string, unknown>) => {
+      socket.request({ id, ...payload });
+      await until(() => socket.reply(id) !== undefined);
+      return socket.reply(id);
+    };
+
+    expect(
+      await ask(1, { op: "install", path: "/sdcard/a.apk" }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await ask(2, { op: "install", path: "/sdcard/bad.apk" }),
+    ).toMatchObject({ ok: false });
+    expect(
+      await ask(3, { op: "install", path: "/sdcard/n.txt" }),
+    ).toMatchObject({ ok: false });
+
+    expect(await ask(4, { op: "reboot", mode: "recovery" })).toMatchObject({
+      ok: true,
+    });
+    expect(device.commands).toContain("reboot recovery");
+    expect(await ask(5, { op: "reboot", mode: "format; rm" })).toMatchObject({
+      ok: false,
+    });
+
+    expect(
+      await ask(6, {
+        op: "copy",
+        from: "/sdcard/n.txt",
+        to: "/sdcard/Docs/n.txt",
+      }),
+    ).toMatchObject({ ok: true });
+    expect(device.files.has("/sdcard/Docs/n.txt")).toBe(true);
+    expect(
+      await ask(7, {
+        op: "copy",
+        from: "/sdcard/n.txt",
+        to: "/sdcard/Docs/n.txt",
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      await ask(8, {
+        op: "rename",
+        from: "/sdcard/Docs",
+        to: "/sdcard/Docs/in",
+      }),
+    ).toMatchObject({ ok: false });
+    expect(device.files.has("/sdcard/Docs")).toBe(true);
     socket.close();
   });
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.1
+
+### Added
+
+- Right click menu in the file manager: open or edit, install (for `.apk`), download, copy, cut, paste (also into a folder), rename, permissions, delete. On empty space: paste, new folder, upload, refresh. Ctrl+C, Ctrl+X and Ctrl+V work too; copy and move never overwrite an existing name.
+- Installing an APK from the file manager. It goes through a temporary copy in `/data/local/tmp` that is removed afterwards, because Android's package manager can't read `/sdcard`.
+- Folders upload to the phone: drag a folder (or several) into the file manager, or use the "Upload folder" button. Subfolders and empty folders are kept; a folder shows as one row with its total progress.
+- Drag selected files onto a folder in the list to move them there (hold Ctrl to copy). Dropping files from your computer on a folder row uploads into that folder.
+- Click a column header to sort by name, permissions, size or date; click again to reverse. Folders stay on top.
+- Search by name in the current folder and everything below it (Ctrl+F or the search field, up to 500 results). Results work like the list: open, edit, download, copy, rename and the rest.
+- Toggle for hidden files, and a line under the list with the phone's name, Android version, battery and free space. The battery is left out when the device has none (a TV, a box).
+- A "Power" button on the host row: reboot, recovery, bootloader and power off, each after a confirmation.
+- When a connection fails on a phone that has connected or paired before, the terminal and the file manager offer a field for the new port. Wireless debugging picks a new port every time it is switched on, and the phone still trusts Termix, so no new pairing is needed.
+
+### Changed
+
+- The Download, Rename, Permissions and Delete buttons moved from the file manager's toolbar to the right click menu.
+- Folder upload is supported now (1.2.0 uploaded files only).
+
+### Fixed
+
+- The modified column of the file list cut the time off. Dates are shorter now, and the full date is in the tooltip.
+
 ## 1.2.0
 
 ### Added

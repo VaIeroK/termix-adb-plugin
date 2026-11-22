@@ -10,6 +10,7 @@ import { Terminal } from "@xterm/xterm";
 import xtermCss from "@xterm/xterm/css/xterm.css?inline";
 import { useTranslation, type TabProps } from "@termix-ssh/plugin-sdk/frontend";
 import { pairSocketUrl, shellSocketUrl } from "./app";
+import { PortFix } from "./PortFix";
 
 type Status = "connecting" | "authorizing" | "ready" | "closed" | "error";
 
@@ -476,6 +477,9 @@ export function AdbTab({
               </button>
             )}
           </div>
+          {status === "error" && !needsPairing && (
+            <PortFix hostId={hostId} onSaved={reconnect} />
+          )}
           {needsPairing && ended && (
             <div
               onKeyDown={(event) => {

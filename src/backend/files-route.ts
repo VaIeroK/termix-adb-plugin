@@ -1,3 +1,4 @@
+import { markPaired } from "./paired.js";
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { PluginContext } from "@termix-ssh/plugin-sdk/backend";
@@ -44,10 +45,81 @@ interface Request {
   content?: string;
   mode?: number | string;
   recursive?: boolean;
+  query?: string;
 }
 
 /** Largest file the text editor opens or saves. */
 const MAX_EDIT_BYTES = 2 * 1024 * 1024;
+
+/** Most results a search returns; one more is asked for to know it was cut. */
+const SEARCH_LIMIT = 500;
+
+/** `find` pattern that matches the text anywhere in a name, wildcards literal. */
+export function searchPattern(query: string): string {
+  return `*${query.replace(/[\\*?[\]]/g, "\\$&")}*`;
+}
+
+/** Lines of "%F|%a|%s|%Y|%n" from stat, as entries named relative to `base`. */
+export function parseSearch(output: string, base: string) {
+  const prefix = base === "/" ? "/" : `${base}/`;
+  const entries: {
+    name: string;
+    mode: number;
+    size: number;
+    mtime: number;
+    dir: boolean;
+    link: boolean;
+  }[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const parts = line.split("|");
+    if (parts.length < 5) continue;
+    const full = parts.slice(4).join("|");
+    if (!full.startsWith(prefix) || full.length === prefix.length) continue;
+    entries.push({
+      name: full.slice(prefix.length),
+      mode: Number.parseInt(parts[1], 8) || 0,
+      size: Number.parseInt(parts[2], 10) || 0,
+      mtime: Number.parseInt(parts[3], 10) || 0,
+      dir: parts[0] === "directory",
+      link: parts[0] === "symbolic link",
+    });
+  }
+  return entries;
+}
+
+const REBOOT_COMMANDS: Record<string, string> = {
+  system: "reboot",
+  recovery: "reboot recovery",
+  bootloader: "reboot bootloader",
+  poweroff: "reboot -p",
+};
+
+/** The "key=value" lines the info command prints, as numbers and text. */
+export function parseInfo(output: string) {
+  const values = new Map<string, string>();
+  for (const line of output.split(/\r?\n/)) {
+    const at = line.indexOf("=");
+    if (at > 0) values.set(line.slice(0, at), line.slice(at + 1).trim());
+  }
+  const number = (key: string) => {
+    const parsed = Number.parseInt(values.get(key) ?? "", 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  // "Filesystem 1K-blocks Used Available Use% Mounted on"
+  const columns = (values.get("df") ?? "").split(/\s+/);
+  const totalKb = Number.parseInt(columns[1] ?? "", 10);
+  const freeKb = Number.parseInt(columns[3] ?? "", 10);
+  return {
+    brand: values.get("brand") || null,
+    model: values.get("model") || null,
+    android: values.get("android") || null,
+    sdk: number("sdk"),
+    // A TV or a box reports level 0 with no battery fitted: show nothing.
+    battery: values.get("present") === "1" ? number("battery") : null,
+    totalBytes: Number.isFinite(totalKb) ? totalKb * 1024 : null,
+    freeBytes: Number.isFinite(freeKb) ? freeKb * 1024 : null,
+  };
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -327,6 +399,16 @@ export function registerFilesRoute(
       if (code !== 0) throw new Error(output || `Command failed (${code})`);
     };
 
+    // Never merge into or overwrite something that is already there.
+    const assertFree = async (from: string, to: string) => {
+      if (to === from || to.startsWith(`${from}/`)) {
+        throw new Error("Can't put a folder into itself");
+      }
+      if (await statPath(adb as AdbConnection, to)) {
+        throw new Error(`${baseName(to)} already exists there`);
+      }
+    };
+
     const handle = async (message: Request) => {
       const id = message.id as number;
       try {
@@ -354,6 +436,7 @@ export function registerFilesRoute(
           case "rename": {
             const from = assertDevicePath(message.from ?? "");
             const to = assertDevicePath(message.to ?? "");
+            await assertFree(from, to);
             await run(`mv ${shellQuote(from)} ${shellQuote(to)}`);
             await audit("adb_files_rename", `${from} -> ${to}`);
             say({ id, ok: true });
@@ -362,6 +445,7 @@ export function registerFilesRoute(
           case "copy": {
             const from = assertDevicePath(message.from ?? "");
             const to = assertDevicePath(message.to ?? "");
+            await assertFree(from, to);
             await run(`cp -r ${shellQuote(from)} ${shellQuote(to)}`);
             await audit("adb_files_copy", `${from} -> ${to}`);
             say({ id, ok: true });
@@ -408,6 +492,99 @@ export function registerFilesRoute(
                   : `${single ? baseName(paths[0]) : "adb-files"}.zip`,
               size: single && !first.dir ? first.size : null,
             });
+            return;
+          }
+          case "search": {
+            const base = assertDevicePath(message.path ?? "/");
+            const query = String(message.query ?? "").trim();
+            if (!query || query.length > 100) {
+              throw new Error("Enter a name to look for");
+            }
+            const { output } = await runCommand(
+              adb as AdbConnection,
+              `find ${shellQuote(base)} -iname ${shellQuote(searchPattern(query))} ` +
+                `-exec stat -c '%F|%a|%s|%Y|%n' {} + 2>/dev/null | head -n ${SEARCH_LIMIT + 1}`,
+              120_000,
+            );
+            const found = parseSearch(output, base);
+            say({
+              id,
+              ok: true,
+              path: base,
+              entries: found.slice(0, SEARCH_LIMIT),
+              truncated: found.length > SEARCH_LIMIT,
+            });
+            return;
+          }
+          case "info": {
+            const { output } = await runCommand(
+              adb as AdbConnection,
+              'echo "brand=$(getprop ro.product.manufacturer)"; ' +
+                'echo "model=$(getprop ro.product.model)"; ' +
+                'echo "android=$(getprop ro.build.version.release)"; ' +
+                'echo "sdk=$(getprop ro.build.version.sdk)"; ' +
+                'echo "present=$(dumpsys battery | grep -m1 present: | grep -c true)"; ' +
+                'echo "battery=$(dumpsys battery | grep -m1 level | tr -dc 0-9)"; ' +
+                'echo "df=$(df -k /sdcard | tail -1)"',
+              15_000,
+            );
+            say({ id, ok: true, info: parseInfo(output) });
+            return;
+          }
+          case "install": {
+            const path = assertDevicePath(message.path ?? "");
+            if (!/\.apk$/i.test(path)) throw new Error("This is not an APK");
+            // The package manager runs as system_server, which SELinux keeps
+            // out of /sdcard ("Unable to open file"). Like `adb install`, give
+            // it a copy in /data/local/tmp, which the shell user can write.
+            const staged = `/data/local/tmp/termix-${Date.now()}-${path
+              .slice(path.lastIndexOf("/") + 1)
+              .replace(/[^\w.-]/g, "_")}`;
+            let output: string;
+            try {
+              const copy = await runCommand(
+                adb as AdbConnection,
+                `cp ${shellQuote(path)} ${shellQuote(staged)}`,
+                120_000,
+              );
+              if (copy.code !== 0) {
+                throw new Error(copy.output.trim() || "Could not read the APK");
+              }
+              ({ output } = await runCommand(
+                adb as AdbConnection,
+                `pm install -r ${shellQuote(staged)}`,
+                300_000,
+              ));
+            } finally {
+              await runCommand(
+                adb as AdbConnection,
+                `rm -f ${shellQuote(staged)}`,
+                15_000,
+              ).catch(() => undefined);
+            }
+            const text = output.trim();
+            if (!/\bSuccess\b/.test(text)) {
+              await audit("adb_files_install", path, text || "failed");
+              throw new Error(text || "The install failed");
+            }
+            await audit("adb_files_install", path);
+            say({ id, ok: true });
+            return;
+          }
+          case "reboot": {
+            const mode = String(message.mode ?? "");
+            const command = REBOOT_COMMANDS[mode];
+            if (!command) throw new Error("Unknown reboot mode");
+            await audit("adb_reboot", mode);
+            // The device drops the connection while it goes down; that is the
+            // success case, so don't wait for a proper end.
+            await Promise.race([
+              runCommand(adb as AdbConnection, command, 5000).catch(
+                () => undefined,
+              ),
+              new Promise((resolve) => setTimeout(resolve, 3000)),
+            ]);
+            say({ id, ok: true });
             return;
           }
           case "read": {
@@ -620,6 +797,7 @@ export function registerFilesRoute(
         ws.close(CLOSE_NORMAL);
       });
       releaseSession = ctx.hosts.trackSession(hostId);
+      void markPaired(ctx, hostId);
       await audit("adb_files_open", `ADB files on ${target}`);
       say({ type: "phase", phase: "ready" });
       resolveReady();

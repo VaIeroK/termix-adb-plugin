@@ -1,7 +1,7 @@
 {
   "id": "adb",
   "name": "ADB",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "An Android shell over ADB in your browser. Termix speaks the ADB protocol itself, so the server needs no adb binary.",
   "author": {
     "name": "ValeroK"
@@ -95,6 +95,14 @@
             "defaultable": false,
             "descriptionKey": "settings.host.adbPort.description",
             "hidden": true
+          },
+          {
+            "key": "adbPaired",
+            "type": "boolean",
+            "labelKey": "settings.host.adbPaired.label",
+            "default": false,
+            "hidden": true,
+            "defaultable": false
           }
         ]
       }

@@ -53,6 +53,11 @@ vi.mock("@xterm/addon-fit", () => ({
 vi.mock("@xterm/xterm/css/xterm.css?inline", () => ({ default: "" }));
 vi.mock("@termix-ssh/plugin-sdk/frontend", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
+  useSettings: () => ({
+    values: {},
+    loaded: true,
+    save: async () => undefined,
+  }),
 }));
 vi.mock("../../src/frontend/app", () => ({
   shellSocketUrl: async () => null,

@@ -36,6 +36,9 @@
       "adbPort": {
         "label": "ADB port",
         "description": "The port adbd listens on: 5555 after \"adb tcpip 5555\", or the connect port shown on the Wireless debugging screen (Android 11+)."
+      },
+      "adbPaired": {
+        "label": "Paired before"
       }
     }
   },
@@ -55,7 +58,10 @@
     "pairCode": "6-digit code",
     "pair": "Pair",
     "pairing": "Pairing...",
-    "notPaired": "This phone is not paired with this server yet."
+    "notPaired": "This phone is not paired with this server yet.",
+    "portChanged": "The Wireless debugging port changes each time the feature is switched on. Enter the new port shown on the phone; pairing is not required again.",
+    "newPort": "New port",
+    "savePort": "Save and reconnect"
   },
   "files": {
     "title": "ADB Files",
@@ -89,6 +95,41 @@
     "discard": "Discard unsaved changes?",
     "discardYes": "Discard",
     "permissionsHint": "Permissions, e.g. 644",
-    "recursive": "Include contents"
+    "recursive": "Include contents",
+    "open": "Open",
+    "edit": "Edit",
+    "install": "Install",
+    "copy": "Copy",
+    "cut": "Cut",
+    "paste": "Paste",
+    "pasteInto": "Paste into folder",
+    "showHidden": "Show hidden files",
+    "hideHidden": "Hide hidden files",
+    "clearClipboard": "Clear clipboard",
+    "installing": "Installing",
+    "installed": "Installed",
+    "battery": "Battery",
+    "free": "Free",
+    "uploadFolder": "Upload folder",
+    "search": "Search",
+    "searchResults": "Search results for",
+    "clearSearch": "Clear search",
+    "cancelled": "Cancelled"
+  },
+  "power": {
+    "title": "Power",
+    "system": "Reboot",
+    "recovery": "Recovery",
+    "bootloader": "Bootloader",
+    "poweroff": "Power off",
+    "confirm": "The phone will go offline and the open sessions will end.",
+    "go": "Do it",
+    "sent": "Command sent",
+    "ask": {
+      "system": "Reboot the device?",
+      "recovery": "Reboot to recovery?",
+      "bootloader": "Reboot to bootloader?",
+      "poweroff": "Power off the device?"
+    }
   }
 }

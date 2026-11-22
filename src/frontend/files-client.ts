@@ -12,6 +12,16 @@ export interface FileItem {
   link: boolean;
 }
 
+export interface DeviceInfo {
+  brand: string | null;
+  model: string | null;
+  android: string | null;
+  sdk: number | null;
+  battery: number | null;
+  totalBytes: number | null;
+  freeBytes: number | null;
+}
+
 export interface ServerEvent {
   id?: number;
   ok?: boolean;
@@ -27,6 +37,8 @@ export interface ServerEvent {
   name?: string;
   content?: string;
   mode?: number;
+  info?: DeviceInfo;
+  truncated?: boolean;
 }
 
 type Listener = (event: ServerEvent) => void;
@@ -94,6 +106,18 @@ export class FilesClient {
       ServerEvent & { ticket: string; name: string; size: number | null }
     >("downloadTicket", { paths });
     return reply;
+  }
+
+  /** Names matching the text in this folder and everything below it. */
+  async search(
+    path: string,
+    query: string,
+  ): Promise<{ entries: FileItem[]; truncated: boolean }> {
+    const reply = await this.call("search", { path, query });
+    return {
+      entries: reply.entries ?? [],
+      truncated: reply.truncated === true,
+    };
   }
 
   /** Reads a small text file. */
