@@ -7,6 +7,7 @@ import { AdbTab } from "./AdbTab";
 import { FilesTab } from "./FilesTab";
 import { HostAdbSection } from "./HostAdbSection";
 import { adbApp, setAdbApp } from "./app";
+import { setFileManagerApp } from "./filemanager/api/client";
 import { rebootDevice, type RebootMode } from "./power";
 
 const PLUGIN_ID = "adb";
@@ -20,9 +21,24 @@ function adbEnabled(host: PluginHostRecord | null | undefined): boolean {
   return bag?.[PLUGIN_ID]?.enableAdb === true;
 }
 
+function flagOn(host: PluginHostRecord | null | undefined, key: string) {
+  const bag = (host as { pluginSettings?: SettingsBag } | null | undefined)
+    ?.pluginSettings;
+  return bag?.[PLUGIN_ID]?.[key] !== false;
+}
+
+const filesEnabled = (host: PluginHostRecord | null | undefined) =>
+  adbEnabled(host) && flagOn(host, "adbFiles");
+const powerEnabled = (host: PluginHostRecord | null | undefined) =>
+  adbEnabled(host) && flagOn(host, "adbPower");
+
 export function activate(app: TermixApp): void {
   setAdbApp(app);
-  app.onDispose(() => setAdbApp(null));
+  setFileManagerApp(app);
+  app.onDispose(() => {
+    setAdbApp(null);
+    setFileManagerApp(null);
+  });
   // Shared and guest pages have no shell to offer.
   if (app.guest) return;
 
@@ -67,7 +83,7 @@ export function activate(app: TermixApp): void {
     kind: "open",
     order: 126,
     tabType: "adb-files",
-    when: adbEnabled,
+    when: filesEnabled,
   });
 
   // The picker is the host row's own; each choice asks again before it acts.
@@ -107,7 +123,7 @@ export function activate(app: TermixApp): void {
     icon: Power,
     kind: "open",
     order: 127,
-    when: adbEnabled,
+    when: powerEnabled,
     items: () =>
       (["system", "recovery", "bootloader", "poweroff"] as RebootMode[]).map(
         powerItem,
@@ -120,7 +136,7 @@ export function activate(app: TermixApp): void {
     icon: FolderSearch,
     keywords: ["adb", "android", "files"],
     scope: "host",
-    when: (host) => !!host && adbEnabled(host),
+    when: (host) => !!host && filesEnabled(host),
     run: (shell, host) => {
       if (host) shell.openTab(host, "adb-files");
     },
@@ -159,6 +175,6 @@ export function activate(app: TermixApp): void {
     persistent: true,
     session: true,
     commandTarget: false,
-    restore: adbEnabled,
+    restore: filesEnabled,
   });
 }

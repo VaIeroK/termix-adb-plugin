@@ -2,9 +2,9 @@
 
 An Android `adb shell` tab for [Termix](https://github.com/Termix-SSH/Termix), as a plugin. The stock Docker image is enough: Termix speaks the ADB protocol itself over TCP, with RSA authentication, `shell_v2` with a PTY and live resize, and a fallback to the old shell for devices without `shell_v2`.
 
-Android 11+ phones with Wireless debugging are supported too (pairing by code, then ADB over TLS).
+Android 11+ devices with Wireless debugging are supported too (pairing by code, then ADB over TLS).
 
-The plugin also has a file manager for the phone ("ADB Files"), built on the ADB sync protocol: browse, upload and download files and folders (folders as a streamed `.zip`), edit text files, change permissions, copy and move, search, install APKs, and reboot or power off the phone. See [docs/index.md](docs/index.md) for device setup and use.
+The plugin also has a file manager for the device ("ADB Files"), built on the ADB sync protocol: browse, upload and download files and folders (folders as a streamed `.zip`), edit text files, change permissions, copy and move, search, install APKs, and reboot or power off the device. See [docs/index.md](docs/index.md) for device setup and use.
 
 ## Compatibility
 
@@ -66,3 +66,7 @@ The repository follows the Termix plugin template: `.github/workflows/release.ym
 | `locales/`                                                      | Texts                                                                       |
 | `tests/`                                                        | Backend tests against a fake device, frontend and frame tests               |
 | `scripts/set-version.mjs`                                       | Used by `set-version.bat`                                                   |
+
+## Acknowledgements
+
+The file manager (`src/frontend/filemanager`) is based on the frontend of the [Termix File Manager](https://github.com/Termix-SSH/Plugin-File-Manager) plugin, licensed under the Apache License 2.0 (see `LICENSE`). It was changed to talk to a device over ADB: the SFTP, FTP, WebDAV, SMB, transfer, local pane and external editor parts were removed or replaced, the trash was moved to a folder on the device, and APK install, the device status line and the port fix were added. The UI uses components from `@termix-ssh/plugin-sdk`.

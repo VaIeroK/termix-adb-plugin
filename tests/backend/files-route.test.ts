@@ -5,6 +5,8 @@ import type { PluginHostSummary } from "@termix-ssh/plugin-sdk/backend";
 import manifest from "../../manifest.json" with { type: "json" };
 import {
   parseInfo,
+  parseProperties,
+  parseTrash,
   parseSearch,
   searchPattern,
 } from "../../src/backend/files-route.js";
@@ -142,7 +144,10 @@ async function download(ticket: string) {
 
 let lastMock: ReturnType<typeof createMockCtx> | null = null;
 
-async function openFiles(device: FakeFilesDevice) {
+async function openFiles(
+  device: FakeFilesDevice,
+  hostSettings: Record<string, unknown> = {},
+) {
   downloadHandler = null;
   const mock = createMockCtx({
     router: () => ({
@@ -158,6 +163,9 @@ async function openFiles(device: FakeFilesDevice) {
   });
   await mock.ctx.settings.setHost(5, "enableAdb", true);
   await mock.ctx.settings.setHost(5, "adbPort", device.port);
+  for (const [key, value] of Object.entries(hostSettings)) {
+    await mock.ctx.settings.setHost(5, key, value);
+  }
   await activate(mock.ctx);
   lastMock = mock;
   mock.setActor("user-1");
@@ -363,6 +371,133 @@ describe("/files route", () => {
     socket.close();
   });
 
+  it("creates files, reads properties and folder size", async () => {
+    expect(
+      parseProperties(
+        "directory|771|u0_a5|media_rw|4096|1700000000|u:object_r:fuse:s0|/sdcard/D\n",
+        "/sdcard/D",
+      ),
+    ).toMatchObject({
+      dir: true,
+      mode: 0o771,
+      owner: "u0_a5",
+      context: "u:object_r:fuse:s0",
+    });
+    expect(
+      parseProperties("regular file|644|a|b|1|2|?|/x", "/x").context,
+    ).toBeNull();
+
+    const device = await startFilesDevice({
+      "/sdcard": null,
+      "/sdcard/Docs": null,
+      "/sdcard/a.txt": "hello",
+    });
+    devices.push(device);
+    const socket = await openFiles(device);
+    const ask = async (id: number, payload: Record<string, unknown>) => {
+      socket.request({ id, ...payload });
+      await until(() => socket.reply(id) !== undefined);
+      return socket.reply(id);
+    };
+    expect(
+      await ask(1, { op: "newfile", path: "/sdcard/new.txt" }),
+    ).toMatchObject({ ok: true });
+    expect(device.files.get("/sdcard/new.txt")?.data?.length ?? 0).toBe(0);
+    expect(
+      await ask(2, { op: "newfile", path: "/sdcard/a.txt" }),
+    ).toMatchObject({ ok: false });
+    expect(
+      await ask(3, { op: "properties", path: "/sdcard/a.txt" }),
+    ).toMatchObject({
+      ok: true,
+      properties: { size: 5, owner: "u0_a1", context: "u:object_r:fuse:s0" },
+    });
+    expect(
+      await ask(4, { op: "properties", path: "/sdcard/none" }),
+    ).toMatchObject({ ok: false });
+    expect(await ask(5, { op: "dirsize", path: "/sdcard/Docs" })).toMatchObject(
+      {
+        ok: true,
+        bytes: 12 * 1024,
+      },
+    );
+    socket.close();
+  });
+
+  it("compresses and extracts archives", async () => {
+    const device = await startFilesDevice({
+      "/sdcard": null,
+      "/sdcard/a.txt": "hello",
+      "/sdcard/b.txt": "world",
+      "/sdcard/out": null,
+    });
+    devices.push(device);
+    const socket = await openFiles(device);
+    const ask = async (id: number, payload: Record<string, unknown>) => {
+      socket.request({ id, ...payload });
+      await until(() => socket.reply(id) !== undefined);
+      return socket.reply(id);
+    };
+    expect(
+      await ask(1, {
+        op: "compress",
+        paths: ["/sdcard/a.txt", "/sdcard/b.txt"],
+        to: "/sdcard/ab.tar.gz",
+      }),
+    ).toMatchObject({ ok: true });
+    expect(device.commands.some((c) => c.startsWith("tar -czf"))).toBe(true);
+    expect(
+      await ask(2, {
+        op: "compress",
+        paths: ["/sdcard/a.txt"],
+        to: "/sdcard/ab.tar.gz",
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      await ask(3, {
+        op: "compress",
+        paths: ["/sdcard/a.txt"],
+        to: "/sdcard/x.rar",
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      await ask(4, {
+        op: "extract",
+        path: "/sdcard/ab.tar.gz",
+        to: "/sdcard/out",
+      }),
+    ).toMatchObject({ ok: true });
+    expect(device.commands.some((c) => c.startsWith("tar -xf"))).toBe(true);
+    expect(
+      await ask(5, { op: "extract", path: "/sdcard/a.txt" }),
+    ).toMatchObject({ ok: false });
+    socket.close();
+  });
+
+  it("obeys the host's file manager and power switches", async () => {
+    const device = await startFilesDevice({ "/sdcard": null });
+    devices.push(device);
+    const noPower = await openFiles(device, { adbPower: false });
+    noPower.request({ id: 1, op: "reboot", mode: "system" });
+    await until(() => noPower.reply(1) !== undefined);
+    expect(noPower.reply(1)).toMatchObject({ ok: false });
+    expect(device.commands).not.toContain("reboot");
+    noPower.request({ id: 2, op: "list", path: "/sdcard" });
+    await until(() => noPower.reply(2) !== undefined);
+    expect(noPower.reply(2)).toMatchObject({ ok: true });
+    noPower.close();
+
+    const noFiles = await openFiles(device, { adbFiles: false });
+    noFiles.request({ id: 1, op: "list", path: "/sdcard" });
+    await until(() => noFiles.reply(1) !== undefined);
+    expect(noFiles.reply(1)).toMatchObject({ ok: false });
+    noFiles.request({ id: 2, op: "reboot", mode: "system" });
+    await until(() => noFiles.reply(2) !== undefined);
+    expect(noFiles.reply(2)).toMatchObject({ ok: true });
+    expect(device.commands).toContain("reboot");
+    noFiles.close();
+  });
+
   it("parses the device info lines", () => {
     expect(
       parseInfo(
@@ -466,5 +601,28 @@ describe("/files route", () => {
     expect(files.get("Docs/Sub/two.txt")?.toString()).toBe("second");
     expect(files.get("Docs/one.txt")?.toString()).toBe("first");
     socket.close();
+  });
+});
+
+describe("trash listing", () => {
+  it("reads items, sizes and the retention", () => {
+    const out =
+      "@@1700-ab\n/sdcard/Docs/a.txt\n1700000000000\n0\n4\n" +
+      "@@1701-cd\n/sdcard/Pics\n1701000000000\n1\n2048\n@@RET\n14\n";
+    const parsed = parseTrash(out);
+    expect(parsed.retentionDays).toBe(14);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items[0]).toMatchObject({
+      id: "1700-ab",
+      name: "a.txt",
+      originalPath: "/sdcard/Docs/a.txt",
+      isDirectory: false,
+      size: 4096,
+    });
+    expect(parsed.items[1].isDirectory).toBe(true);
+  });
+
+  it("defaults the retention to 7 days", () => {
+    expect(parseTrash("@@RET\n\n").retentionDays).toBe(7);
   });
 });

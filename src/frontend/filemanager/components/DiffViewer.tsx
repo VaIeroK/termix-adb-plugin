@@ -1,0 +1,307 @@
+/* eslint-disable react-hooks/exhaustive-deps */
+import React, { useState, useEffect } from "react";
+import { CodeDiff } from "./CodeDiff.tsx";
+import { Button, LoadingState } from "@termix-ssh/plugin-sdk/ui";
+import { toast } from "sonner";
+import { DownloadProgressToast } from "./DownloadProgressToast";
+import { useTranslation } from "@termix-ssh/plugin-sdk/frontend";
+import {
+  Download,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  ArrowLeftRight,
+  FileText,
+} from "lucide-react";
+import {
+  readSSHFile,
+  downloadSSHFileStream,
+  getSSHStatus,
+  connectSSH,
+} from "../api/ssh-file-operations-api";
+import type { FileItem, SSHHost } from "../host-types";
+
+interface DiffViewerProps {
+  file1: FileItem;
+  file2: FileItem;
+  sshSessionId: string;
+  sshHost: SSHHost;
+  onDownload1?: () => void;
+  onDownload2?: () => void;
+}
+
+export function DiffViewer({
+  file1,
+  file2,
+  sshSessionId,
+  sshHost,
+}: DiffViewerProps) {
+  const { t } = useTranslation();
+  const [content1, setContent1] = useState<string>("");
+  const [content2, setContent2] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [diffMode, setDiffMode] = useState<"side-by-side" | "inline">(
+    "side-by-side",
+  );
+  const [showLineNumbers, setShowLineNumbers] = useState(true);
+
+  const ensureSSHConnection = async () => {
+    try {
+      const status = await getSSHStatus(sshSessionId);
+      if (!status.connected) {
+        await connectSSH(sshSessionId, {
+          hostId: sshHost.id,
+          connectionOrigin: sshHost.connectionOrigin,
+          syncId: sshHost.syncId ?? null,
+          ip: sshHost.ip,
+          port: sshHost.port,
+          username: sshHost.username,
+          password: sshHost.password,
+          sshKey: sshHost.key,
+          keyPassword: sshHost.keyPassword,
+          authType: sshHost.authType,
+          credentialId: sshHost.credentialId,
+          userId: sshHost.userId,
+        });
+      }
+    } catch {
+      await connectSSH(sshSessionId, {
+        hostId: sshHost.id,
+        connectionOrigin: sshHost.connectionOrigin,
+        syncId: sshHost.syncId ?? null,
+        ip: sshHost.ip,
+        port: sshHost.port,
+        username: sshHost.username,
+        password: sshHost.password,
+        sshKey: sshHost.key,
+        keyPassword: sshHost.keyPassword,
+        authType: sshHost.authType,
+        credentialId: sshHost.credentialId,
+        userId: sshHost.userId,
+      });
+    }
+  };
+
+  const loadFileContents = async () => {
+    if (file1.type !== "file" || file2.type !== "file") {
+      setError(t("fileManager.canOnlyCompareFiles"));
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      await ensureSSHConnection();
+
+      const [response1, response2] = await Promise.all([
+        readSSHFile(sshSessionId, file1.path),
+        readSSHFile(sshSessionId, file2.path),
+      ]);
+
+      setContent1(response1.content || "");
+      setContent2(response2.content || "");
+    } catch (error: unknown) {
+      const err = error as {
+        message?: string;
+        response?: { data?: { tooLarge?: boolean; error?: string } };
+      };
+      const errorData = err?.response?.data;
+      if (errorData?.tooLarge) {
+        setError(t("fileManager.fileTooLarge", { error: errorData.error }));
+      } else if (
+        err.message?.includes("connection") ||
+        err.message?.includes("established")
+      ) {
+        setError(
+          t("fileManager.sshConnectionFailed", {
+            name: sshHost.name,
+            ip: sshHost.ip,
+            port: sshHost.port,
+          }),
+        );
+      } else {
+        setError(
+          t("fileManager.loadFileFailed", {
+            error:
+              err.message || errorData?.error || t("fileManager.unknownError"),
+          }),
+        );
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDownloadFile = async (file: FileItem) => {
+    const controller = new AbortController();
+    const cancel = {
+      label: t("fileManager.cancel"),
+      onClick: () => controller.abort(),
+    };
+    const toastId = toast.loading(
+      <DownloadProgressToast t={t} fileName={file.name} loaded={0} />,
+      { duration: Infinity, cancel },
+    );
+    try {
+      await ensureSSHConnection();
+      controller.signal.throwIfAborted();
+      await downloadSSHFileStream(
+        sshSessionId,
+        file.path,
+        ({ loaded, total }) => {
+          if (controller.signal.aborted) return;
+          toast.loading(
+            <DownloadProgressToast
+              t={t}
+              fileName={file.name}
+              loaded={loaded}
+              total={total}
+            />,
+            { id: toastId, duration: Infinity, cancel },
+          );
+        },
+        controller.signal,
+      );
+      toast.success(t("fileManager.downloadFileSuccess", { name: file.name }), {
+        id: toastId,
+        duration: undefined,
+      });
+    } catch (error: unknown) {
+      if (controller.signal.aborted) {
+        toast.info(t("fileManager.localTransferCancelled"), {
+          id: toastId,
+          duration: undefined,
+        });
+        return;
+      }
+      const err = error as { message?: string };
+      toast.error(
+        t("fileManager.downloadFileFailed") +
+          ": " +
+          (err.message || t("fileManager.unknownError")),
+        { id: toastId, duration: undefined },
+      );
+    }
+  };
+
+  useEffect(() => {
+    loadFileContents();
+  }, [file1, file2, sshSessionId]);
+
+  if (isLoading) {
+    return (
+      <div className="h-full flex items-center justify-center bg-background">
+        <LoadingState label={t("fileManager.loadingFileComparison")} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-full flex items-center justify-center bg-background">
+        <div className="text-center max-w-md">
+          <FileText className="w-16 h-16 mx-auto mb-4 text-red-500 opacity-50" />
+          <p className="text-red-500 mb-4">{error}</p>
+          <Button onClick={loadFileContents} variant="outline">
+            <RefreshCw className="w-4 h-4 mr-2" />
+            {t("fileManager.reload")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col bg-background">
+      <div className="flex-shrink-0 border-b border-border p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="text-sm">
+              <span className="text-muted-foreground">
+                {t("fileManager.compare")}:
+              </span>
+              <span className="font-medium text-green-400 mx-2">
+                {file1.name}
+              </span>
+              <ArrowLeftRight className="w-4 h-4 inline mx-1" />
+              <span className="font-medium text-blue-400">{file2.name}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setDiffMode(
+                  diffMode === "side-by-side" ? "inline" : "side-by-side",
+                )
+              }
+            >
+              {diffMode === "side-by-side"
+                ? t("fileManager.sideBySide")
+                : t("fileManager.inline")}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowLineNumbers(!showLineNumbers)}
+              title={t("fileManager.lineNumbers")}
+              aria-label={t("fileManager.lineNumbers")}
+              aria-pressed={showLineNumbers}
+            >
+              {showLineNumbers ? (
+                <Eye className="w-4 h-4" />
+              ) : (
+                <EyeOff className="w-4 h-4" />
+              )}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleDownloadFile(file1)}
+              title={t("fileManager.downloadFile", { name: file1.name })}
+            >
+              <Download className="w-4 h-4 mr-1" />
+              {file1.name}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleDownloadFile(file2)}
+              title={t("fileManager.downloadFile", { name: file2.name })}
+            >
+              <Download className="w-4 h-4 mr-1" />
+              {file2.name}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadFileContents}
+              title={t("fileManager.refresh")}
+              aria-label={t("fileManager.refresh")}
+            >
+              <RefreshCw className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1">
+        <CodeDiff
+          fileName={file1.name}
+          original={content1}
+          modified={content2}
+          sideBySide={diffMode === "side-by-side"}
+          showLineNumbers={showLineNumbers}
+        />
+      </div>
+    </div>
+  );
+}

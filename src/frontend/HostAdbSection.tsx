@@ -1,6 +1,6 @@
 import type { HostEditorSectionProps } from "@termix-ssh/plugin-sdk/frontend";
 import { useTranslation } from "@termix-ssh/plugin-sdk/frontend";
-import { Input, SectionCard } from "@termix-ssh/plugin-sdk/ui";
+import { Input, SectionCard, SwitchRow } from "@termix-ssh/plugin-sdk/ui";
 import { Smartphone } from "lucide-react";
 
 const PLUGIN_ID = "adb";
@@ -14,13 +14,14 @@ export function HostAdbSection({ form, setField }: HostEditorSectionProps) {
   const bag = (form?.pluginSettings as Bag | undefined) ?? {};
   const port = Number(bag[PLUGIN_ID]?.adbPort);
 
-  const setPort = (value: string) => {
-    const next = value === "" ? DEFAULT_PORT : Number(value);
+  const setOwn = (key: string, value: unknown) => {
     setField("pluginSettings", {
       ...bag,
-      [PLUGIN_ID]: { ...(bag[PLUGIN_ID] ?? {}), adbPort: next },
+      [PLUGIN_ID]: { ...(bag[PLUGIN_ID] ?? {}), [key]: value },
     });
   };
+  const setPort = (value: string) =>
+    setOwn("adbPort", value === "" ? DEFAULT_PORT : Number(value));
 
   return (
     <SectionCard
@@ -44,6 +45,18 @@ export function HostAdbSection({ form, setField }: HostEditorSectionProps) {
           {t("settings.host.adbPort.description")}
         </p>
       </div>
+      <SwitchRow
+        label={t("settings.host.adbFiles.label")}
+        description={t("settings.host.adbFiles.description")}
+        checked={bag[PLUGIN_ID]?.adbFiles !== false}
+        onChange={(value) => setOwn("adbFiles", value)}
+      />
+      <SwitchRow
+        label={t("settings.host.adbPower.label")}
+        description={t("settings.host.adbPower.description")}
+        checked={bag[PLUGIN_ID]?.adbPower !== false}
+        onChange={(value) => setOwn("adbPower", value)}
+      />
     </SectionCard>
   );
 }

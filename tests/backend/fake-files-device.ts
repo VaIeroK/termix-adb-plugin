@@ -216,6 +216,15 @@ export async function startFilesDevice(
         output = paths[0]?.includes("bad")
           ? "Failure [INSTALL_FAILED_INVALID_APK]"
           : "Success";
+      } else if (bin === "tar" || bin === "unzip") {
+        // Only the command is checked; the archive gets a placeholder body.
+        if (args.includes("-czf")) {
+          device.files.set(paths[0], {
+            dir: false,
+            data: Buffer.from("tar"),
+            mtime: 1_700_000_000,
+          });
+        }
       } else if (bin === "reboot") {
         // Nothing comes back from a device that is going down.
       } else if (bin === "cp" && paths.length === 2) {
@@ -227,6 +236,23 @@ export async function startFilesDevice(
             );
           }
         }
+      } else if (bin === "stat") {
+        const file = device.files.get(paths[0]);
+        output = file
+          ? [
+              file.dir ? "directory" : "regular file",
+              "644",
+              "u0_a1",
+              "media_rw",
+              file.data?.length ?? 0,
+              file.mtime,
+              args.join(" ").includes("%C") ? "u:object_r:fuse:s0" : "",
+              paths[0],
+            ].join("|")
+          : "stat: no such file";
+        if (!file) code = 1;
+      } else if (bin === "du") {
+        output = `12\t${paths[0]}`;
       } else if (bin === "find") {
         const term = (args[args.indexOf("-iname") + 1] ?? "")
           .replace(/\\(.)/g, "$1")

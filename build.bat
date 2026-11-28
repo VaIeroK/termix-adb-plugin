@@ -43,8 +43,8 @@ if errorlevel 1 goto fail
 
 echo [7/7] Done.
 echo.
-echo SUCCESS. The .tmxplug file is in this folder.
-pause
+echo SUCCESS. The .tmxplug file is in this folder. Closing in 5 seconds...
+timeout /t 5 /nobreak >nul
 exit /b 0
 
 :fail

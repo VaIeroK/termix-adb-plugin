@@ -37,7 +37,12 @@ function ensureXtermCss(): void {
 
 const encoder = new TextEncoder();
 
+function shellQuote(text: string): string {
+  return `'${text.replace(/'/g, `'\\''`)}'`;
+}
+
 export function AdbTab({
+  tab,
   host,
   isVisible,
   isFocusedPane,
@@ -239,6 +244,7 @@ export function AdbTab({
     let cancelled = false;
     let socket: WebSocket | null = null;
     let finished = false;
+    let cwdSent = false;
     setStatus("connecting");
     setDetail("");
     setNeedsPairing(false);
@@ -276,6 +282,20 @@ export function AdbTab({
               setStatus(message.phase);
               if (message.phase === "ready" && isFocusedPane) {
                 term.focus();
+              }
+              // "Open in terminal" from the file manager passes a folder.
+              const cwd = (tab as { data?: { cwd?: unknown } } | undefined)
+                ?.data?.cwd;
+              if (
+                message.phase === "ready" &&
+                typeof cwd === "string" &&
+                cwd.startsWith("/") &&
+                !cwdSent
+              ) {
+                cwdSent = true;
+                socket?.send(
+                  encoder.encode(`cd ${shellQuote(cwd)} && clear\n`),
+                );
               }
             } else if (message.type === "exit") {
               finished = true;

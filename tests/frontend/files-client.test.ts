@@ -63,6 +63,27 @@ describe("FilesClient", () => {
     await expect(failing).rejects.toThrow("nope");
   });
 
+  it("checks existence, properties and folder size", async () => {
+    const socket = new FakeSocket();
+    const client = new FilesClient(socket as never);
+    const reply = (index: number, body: Record<string, unknown>) =>
+      client.dispatch(
+        JSON.stringify({ id: socket.json(index).id, ok: true, ...body }),
+      );
+    const exists = client.exists("/sdcard/a");
+    reply(0, { entry: { name: "a" } });
+    await expect(exists).resolves.toBe(true);
+    const missing = client.exists("/sdcard/b");
+    reply(1, { entry: null });
+    await expect(missing).resolves.toBe(false);
+    const props = client.properties("/sdcard/a");
+    reply(2, { properties: { path: "/sdcard/a", owner: "u0_a1" } });
+    await expect(props).resolves.toMatchObject({ owner: "u0_a1" });
+    const size = client.dirSize("/sdcard");
+    reply(3, { bytes: 2048 });
+    await expect(size).resolves.toBe(2048);
+  });
+
   it("asks for a download ticket", async () => {
     const socket = new FakeSocket();
     const client = new FilesClient(socket as never);

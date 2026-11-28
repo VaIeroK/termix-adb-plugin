@@ -17,10 +17,10 @@ vi.mock("@termix-ssh/plugin-sdk/frontend", () => ({
 import { PortFix } from "../../src/frontend/PortFix.js";
 
 describe("PortFix", () => {
-  it("offers nothing until the phone has been paired once", () => {
+  it("is shown even if the host was never marked as paired", () => {
     h.settings.values = { adbPort: 5555 };
     const view = render(<PortFix hostId="5" onSaved={() => undefined} />);
-    expect(view.container.firstChild).toBeNull();
+    expect(view.getByLabelText("adb.newPort")).toBeTruthy();
   });
 
   it("saves the new port next to the other settings and reconnects", async () => {

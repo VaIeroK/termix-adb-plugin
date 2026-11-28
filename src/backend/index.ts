@@ -269,7 +269,7 @@ export function activate(ctx: PluginContext): void {
           };
           const port = Number(message.port);
           if (!Number.isInteger(port) || port < 1 || port > 65535) {
-            refuse("Enter the pairing port from the phone");
+            refuse("Enter the pairing port from the device");
             return;
           }
           const access = await ctx.hosts.checkAccess(hostId, "connect");

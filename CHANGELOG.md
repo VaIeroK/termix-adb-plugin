@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.2.2
+
+### Added
+
+- The file manager is now the Termix File Manager plugin's own frontend (Apache License 2.0), kept in `src/frontend/filemanager` with the same file layout, and connected to the device through the `/files` socket instead of SFTP. That brings its back row inside folders, the resizable sidebar, the code editor, image, audio, PDF and Markdown viewers, tabs of open files, compress and extract, pinned and recent files, shortcuts and name conflict dialogs. Kept from this plugin: APK install, the device line at the bottom, Properties, Open in terminal, the port fix after a failed connect. Left out because a device has no use for them: SFTP, FTP, WebDAV, SMB, host to host transfers, the local file pane and the external editor. The trash works too: deleted items move to a hidden `/sdcard/.termix-trash` folder on the device, can be restored or deleted for good from the trash dialog, and are removed after the retention (7 days by default, changeable there). Moving between storage volumes copies, so the space is freed only when the trash is emptied. Pinned files, recent files and shortcuts are stored per host in the browser.
+- Backend: `trash`, `trashList`, `trashRestore`, `trashDelete`, `trashEmpty`, `trashRetention`, `readbin` (a file as base64, up to 64 MB, for the viewers) and an `overwrite` flag on `rename` and `copy`.
+- Uploading a name that already exists asks first: Replace, Keep both (the new one becomes `name (1).ext`), Skip or Cancel. The answer applies to everything in that upload.
+- "New file" on empty space: creates an empty file and opens it in the editor.
+- "Copy path" in the right click menu (several selected items give one path per line).
+- "Properties" for one file or folder: full path, type, owner and group, permissions, size, modified date and SELinux context. A folder's size is counted in the background.
+- "Open in terminal" on a folder, and on empty space for the current folder: opens a new ADB terminal that starts in it.
+- Two switches in the host's ADB tab: "File manager" and "Power control". Both are on by default; with one off the buttons are hidden and the server refuses those requests for that host.
+- Ctrl+D in the file manager makes a copy of the selection next to it. Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V now work in any keyboard layout (they matched the letter before, so they failed on a Russian layout).
+- A small button in the transfer list clears the finished entries.
+- The file manager looks like the Termix file manager: toolbar with back, forward, up, refresh, a clickable path bar (click it to type a path), search, grid and list views with a compact mode, Upload (files or a folder), Sort and New menus, a status line with the item count, and a sidebar with recent files and a folder tree (it can be hidden; the choice is remembered).
+- File and folder icons and colours, the right click menu and the selection colour (the Termix accent colour) match the Termix file manager. "Compact rows" now works in the list view. The README credits the Termix file manager.
+- Prompts use the same dialogs as the Termix file manager: delete confirmation, "item already exists" (Replace, Skip, Keep both), permissions and properties. New folder, new file and rename are typed in place in the list or grid, and errors show as toasts. The old bars above the list are gone.
+- Search filters the current folder while you type; there is no Enter step and no recursive search any more.
+- Backend only, no buttons yet: `compress` (items of one folder into a `.tar.gz`) and `extract` (`.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.zip` into a folder) on the `/files` socket.
+
+### Changed
+
+- Power texts, and the "not paired" messages, say "device" instead of "phone", since not every ADB device is a phone.
+- The wrong-port field after a failed connect is always shown now. It depended on a "paired before" flag that was lost on an update.
+- The wireless debugging port text and the pairing help say "device" instead of "phone" everywhere.
+- `build.bat` closes by itself 5 seconds after a successful build.
+- The "New folder" button is gone from the toolbar; it is in the right click menu.
+
+### Fixed
+
+- Dropping files from the desktop could fail with "A URI supplied to the API was malformed". If the folder API is refused, the dropped files are uploaded as plain files. A folder that cannot be read this way is not uploaded as an empty file; a message points to the "Upload folder" button.
+
 ## 1.2.1
 
 ### Added

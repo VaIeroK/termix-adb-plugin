@@ -6,7 +6,6 @@ const border = "1px solid rgba(128,128,128,0.45)";
 /**
  * After a failed connect: wireless debugging picks a new port every time it
  * is switched on, and a phone that already trusts Termix needs only that port.
- * Shown only once this host has connected or paired before.
  */
 export function PortFix({
   hostId,
@@ -21,7 +20,7 @@ export function PortFix({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  if (!settings.loaded || settings.values.adbPaired !== true) return null;
+  if (!settings.loaded) return null;
   const current = Number(settings.values.adbPort) || 5555;
   const port = Number(value);
   const valid = Number.isInteger(port) && port >= 1 && port <= 65535;

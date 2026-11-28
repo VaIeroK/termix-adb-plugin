@@ -22,6 +22,19 @@ export interface DeviceInfo {
   freeBytes: number | null;
 }
 
+export interface FileProperties {
+  path: string;
+  type: string;
+  dir: boolean;
+  link: boolean;
+  mode: number;
+  owner: string;
+  group: string;
+  size: number;
+  mtime: number;
+  context: string | null;
+}
+
 export interface ServerEvent {
   id?: number;
   ok?: boolean;
@@ -31,6 +44,8 @@ export interface ServerEvent {
   message?: string;
   needsPairing?: boolean;
   entries?: FileItem[];
+  entry?: FileItem | null;
+  properties?: FileProperties;
   size?: number | null;
   bytes?: number;
   ticket?: string;
@@ -39,6 +54,19 @@ export interface ServerEvent {
   mode?: number;
   info?: DeviceInfo;
   truncated?: boolean;
+  results?: Array<{ path: string; error?: string }>;
+  trash?: {
+    items: Array<{
+      id: string;
+      name: string;
+      originalPath: string;
+      isDirectory: boolean;
+      deletedAt: string;
+      size: number;
+    }>;
+    retentionDays: number;
+    canManageRetention: boolean;
+  };
 }
 
 type Listener = (event: ServerEvent) => void;
@@ -118,6 +146,25 @@ export class FilesClient {
       entries: reply.entries ?? [],
       truncated: reply.truncated === true,
     };
+  }
+
+  /** Whether something is already at this path. */
+  async exists(path: string): Promise<boolean> {
+    const reply = await this.call("stat", { path });
+    return Boolean(reply.entry);
+  }
+
+  /** Owner, group, permissions and SELinux context of one path. */
+  async properties(path: string): Promise<FileProperties> {
+    const reply = await this.call("properties", { path });
+    if (!reply.properties) throw new Error("No properties");
+    return reply.properties;
+  }
+
+  /** Total size of a folder in bytes. */
+  async dirSize(path: string): Promise<number> {
+    const reply = await this.call("dirsize", { path });
+    return reply.bytes ?? 0;
   }
 
   /** Reads a small text file. */
